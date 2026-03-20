@@ -24,7 +24,6 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { FilesService } from './files.service';
 import { randomUUID } from 'crypto';
-import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Files')
 @Controller('files')
@@ -68,8 +67,7 @@ export class FilesController {
   }
 
   @Get(':id/download')
-  @Public()
-  @ApiOperation({ summary: 'Download file content' })
+  @ApiOperation({ summary: 'Download file content (authenticated)' })
   async download(@Param('id', ParseUUIDPipe) id: string) {
     const rec = await this.files.getOrThrow(id);
     const stream = createReadStream(rec.path);

@@ -39,9 +39,15 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         return;
       }
 
-      const payload = this.jwtService.verify(token, {
+      const payload = this.jwtService.verify<{ sub?: string; type?: string }>(token, {
         secret: this.config.get<string>('jwt.secret'),
       });
+
+      if (payload.type !== 'access') {
+        this.logger.debug(`Client ${client.id} disconnected: not an access token`);
+        client.disconnect();
+        return;
+      }
 
       const userId = payload.sub;
       if (!userId) {
