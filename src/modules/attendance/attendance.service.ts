@@ -1,12 +1,20 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AttendanceSession } from './entities/attendance-session.entity';
 import { AttendanceMark } from './entities/attendance-mark.entity';
 import { Enrollment } from '../enrollments/entities/enrollment.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
+import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { GamificationService } from '../gamification/gamification.service';
+import { User, UserRole } from '../users/entities/user.entity';
 
 @Injectable()
 export class AttendanceService {
@@ -15,11 +23,33 @@ export class AttendanceService {
     @InjectRepository(AttendanceMark) private readonly markRepo: Repository<AttendanceMark>,
     @InjectRepository(Enrollment) private readonly enrRepo: Repository<Enrollment>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
+    @InjectRepository(ClassOffering) private readonly coRepo: Repository<ClassOffering>,
     private readonly notifications: NotificationsService,
     private readonly gamification: GamificationService,
   ) {}
 
-  async createSession(body: { classOfferingId: string; date: string; takenById: string }) {
+  async assertStudentViewer(viewer: User, studentId: string) {
+    if (viewer.role === UserRole.ADMIN || viewer.role === UserRole.TEACHER) return;
+    if (viewer.role === UserRole.STUDENT && viewer.id === studentId) return;
+    if (viewer.role === UserRole.PARENT) {
+      const link = await this.psRepo.findOne({ where: { parentId: viewer.id, studentId } });
+      if (link) return;
+    }
+    throw new ForbiddenException('Cannot access this student');
+  }
+
+  private async assertTeacherOwnsClass(viewer: User, classOfferingId: string) {
+    if (viewer.role === UserRole.ADMIN) return;
+    if (viewer.role !== UserRole.TEACHER) {
+      throw new ForbiddenException('Only staff can manage attendance for this class');
+    }
+    const co = await this.coRepo.findOne({ where: { id: classOfferingId } });
+    if (!co) throw new NotFoundException('Class offering not found');
+    if (co.teacherId !== viewer.id) throw new ForbiddenException('You do not teach this class');
+  }
+
+  async createSession(body: { classOfferingId: string; date: string; takenById: string }, viewer: User) {
+    await this.assertTeacherOwnsClass(viewer, body.classOfferingId);
     const dup = await this.sessRepo.findOne({ where: { classOfferingId: body.classOfferingId, date: body.date } });
     if (dup) throw new ConflictException('Session already exists for this date');
     return this.sessRepo.save(this.sessRepo.create(body));
@@ -29,9 +59,14 @@ export class AttendanceService {
     return this.sessRepo.find({ where: { classOfferingId }, order: { date: 'DESC' } });
   }
 
-  async putMarks(sessionId: string, marks: { studentId: string; status: string; note?: string }[]) {
+  async putMarks(
+    sessionId: string,
+    marks: { studentId: string; status: string; note?: string }[],
+    viewer: User,
+  ) {
     const session = await this.sessRepo.findOne({ where: { id: sessionId } });
     if (!session) throw new NotFoundException('Session not found');
+    await this.assertTeacherOwnsClass(viewer, session.classOfferingId);
     const enrolled = await this.enrRepo.find({ where: { classOfferingId: session.classOfferingId, status: 'active' } });
     const ids = new Set(enrolled.map((e) => e.studentId));
     for (const m of marks) {
@@ -69,7 +104,8 @@ export class AttendanceService {
     return this.markRepo.find({ where: { sessionId } });
   }
 
-  async reportStudent(studentId: string) {
+  async reportStudent(studentId: string, viewer: User) {
+    await this.assertStudentViewer(viewer, studentId);
     const marks = await this.markRepo.find({ where: { studentId } });
     const enriched = await Promise.all(
       marks.map(async (m) => {
