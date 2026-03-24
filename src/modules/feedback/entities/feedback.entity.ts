@@ -5,8 +5,9 @@ export class Feedback {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'author_id', type: 'uuid' })
-  authorId: string;
+  /** Null when submission is anonymous. */
+  @Column({ name: 'author_id', type: 'uuid', nullable: true })
+  authorId: string | null;
 
   @Column({ type: 'varchar', length: 80 })
   category: string;
@@ -19,6 +20,15 @@ export class Feedback {
 
   @Column({ name: 'assignee_id', type: 'uuid', nullable: true })
   assigneeId: string | null;
+
+  @Column({ name: 'subject_id', type: 'uuid', nullable: true })
+  subjectId: string | null;
+
+  @Column({ name: 'teacher_id', type: 'uuid', nullable: true })
+  teacherId: string | null;
+
+  @Column({ name: 'is_anonymous', type: 'boolean', default: true })
+  isAnonymous: boolean;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
