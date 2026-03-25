@@ -23,29 +23,34 @@ class CreateEventDto {
 @ApiTags('Calendar')
 @Controller('calendar-events')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN, UserRole.TEACHER)
 @ApiBearerAuth('JWT')
 export class CalendarController {
   constructor(private readonly svc: CalendarService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List events (filter by date range / year / class)' })
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({
+    summary: 'List events (staff: all; student/parent: school-wide + their class offerings)',
+  })
   list(
+    @CurrentUser() user: User,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('academicYearId') academicYearId?: string,
     @Query('classOfferingId') classOfferingId?: string,
   ) {
-    return this.svc.list({ from, to, yearId: academicYearId, classOfferingId });
+    return this.svc.listForViewer(user, { from, to, yearId: academicYearId, classOfferingId });
   }
 
   @Post()
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @ApiOperation({ summary: 'Create event (uses your user as createdBy)' })
   create(@Body() dto: CreateEventDto, @CurrentUser() user: User) {
     return this.svc.create({ ...dto, createdById: user.id });
   }
 
   @Patch(':id')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
   patch(@Param('id', ParseUUIDPipe) id: string, @Body() body: Partial<CreateEventDto>) {
     return this.svc.update(id, body);
   }

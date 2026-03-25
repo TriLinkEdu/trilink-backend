@@ -1,17 +1,57 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { CalendarEvent } from './entities/calendar-event.entity';
+import { Enrollment } from '../enrollments/entities/enrollment.entity';
+import { ParentStudent } from '../parent-students/entities/parent-student.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 
 @Injectable()
 export class CalendarService {
-  constructor(@InjectRepository(CalendarEvent) private readonly repo: Repository<CalendarEvent>) {}
+  constructor(
+    @InjectRepository(CalendarEvent) private readonly repo: Repository<CalendarEvent>,
+    @InjectRepository(Enrollment) private readonly enrRepo: Repository<Enrollment>,
+    @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
+  ) {}
 
-  async list(filters: { from?: string; to?: string; yearId?: string; classOfferingId?: string }) {
+  private baseQuery(filters: { from?: string; to?: string; yearId?: string; classOfferingId?: string }) {
     const qb = this.repo.createQueryBuilder('e').orderBy('e.date', 'ASC');
     if (filters.yearId) qb.andWhere('e.academic_year_id = :y', { y: filters.yearId });
     if (filters.classOfferingId) qb.andWhere('e.class_offering_id = :c', { c: filters.classOfferingId });
     if (filters.from && filters.to) qb.andWhere('e.date BETWEEN :f AND :t', { f: filters.from, t: filters.to });
+    return qb;
+  }
+
+  async list(filters: { from?: string; to?: string; yearId?: string; classOfferingId?: string }) {
+    return this.baseQuery(filters).getMany();
+  }
+
+  async listForViewer(user: User, filters: { from?: string; to?: string; yearId?: string; classOfferingId?: string }) {
+    if (user.role === UserRole.ADMIN || user.role === UserRole.TEACHER) {
+      return this.list(filters);
+    }
+
+    let allowedClassIds: string[] = [];
+    if (user.role === UserRole.STUDENT) {
+      const enr = await this.enrRepo.find({ where: { studentId: user.id, status: 'active' } });
+      allowedClassIds = enr.map((e) => e.classOfferingId);
+    } else if (user.role === UserRole.PARENT) {
+      const links = await this.psRepo.find({ where: { parentId: user.id } });
+      const studentIds = links.map((l) => l.studentId);
+      if (studentIds.length) {
+        const enr = await this.enrRepo.find({
+          where: { studentId: In(studentIds), status: 'active' },
+        });
+        allowedClassIds = [...new Set(enr.map((e) => e.classOfferingId))];
+      }
+    }
+
+    const qb = this.baseQuery(filters);
+    if (allowedClassIds.length === 0) {
+      qb.andWhere('e.class_offering_id IS NULL');
+    } else {
+      qb.andWhere('(e.class_offering_id IS NULL OR e.class_offering_id IN (:...cids))', { cids: allowedClassIds });
+    }
     return qb.getMany();
   }
 
