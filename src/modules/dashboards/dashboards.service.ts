@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
 import { Enrollment } from '../enrollments/entities/enrollment.entity';
@@ -11,6 +11,7 @@ import { AttendanceSession } from '../attendance/entities/attendance-session.ent
 import { AttendanceMark } from '../attendance/entities/attendance-mark.entity';
 import { Announcement } from '../announcements/entities/announcement.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
+import { Feedback } from '../feedback/entities/feedback.entity';
 
 @Injectable()
 export class DashboardsService {
@@ -25,6 +26,7 @@ export class DashboardsService {
     @InjectRepository(AttendanceMark) private readonly attMarks: Repository<AttendanceMark>,
     @InjectRepository(Announcement) private readonly announcements: Repository<Announcement>,
     @InjectRepository(ParentStudent) private readonly ps: Repository<ParentStudent>,
+    @InjectRepository(Feedback) private readonly feedback: Repository<Feedback>,
   ) {}
 
   async admin() {
@@ -36,7 +38,66 @@ export class DashboardsService {
     ]);
     const classes = await this.classes.count();
     const enrollments = await this.enr.count();
-    return { users: { admin, teacher, student, parent, total: admin + teacher + student + parent }, classes, enrollments };
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const dateStr = thirtyDaysAgo.toISOString().split('T')[0];
+
+    const attStats = await this.attMarks
+      .createQueryBuilder('m')
+      .innerJoin('attendance_sessions', 's', 's.id = m.session_id')
+      .where('s.date >= :date', { date: dateStr })
+      .select('m.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('m.status')
+      .getRawMany();
+    let presentCount = 0;
+    let totalAttMarks = 0;
+    for (const stat of attStats) {
+      const c = parseInt(stat.count, 10);
+      if (stat.status === 'present') presentCount += c;
+      totalAttMarks += c;
+    }
+    const schoolAttendanceRate = totalAttMarks > 0 ? presentCount / totalAttMarks : null;
+
+    const publishedExamsCount = await this.exams.count({ where: { published: true } });
+    const totalAttempts = await this.attempts.count();
+    const releasedWithScore = await this.attempts
+      .createQueryBuilder('a')
+      .where('a.released_at IS NOT NULL')
+      .andWhere('a.score IS NOT NULL')
+      .getMany();
+    let avgReleasedScore: number | null = null;
+    if (releasedWithScore.length) {
+      const sum = releasedWithScore.reduce((a, x) => a + (x.score ?? 0), 0);
+      avgReleasedScore = Math.round((sum / releasedWithScore.length) * 100) / 100;
+    }
+
+    const recentAnnouncements = await this.announcements.find({
+      order: { createdAt: 'DESC' },
+      take: 5,
+    });
+
+    const feedbackByStatus = await this.feedback
+      .createQueryBuilder('f')
+      .select('f.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('f.status')
+      .getRawMany();
+    const feedbackSummary: Record<string, number> = {};
+    for (const row of feedbackByStatus) {
+      feedbackSummary[row.status || 'unknown'] = parseInt(row.count, 10);
+    }
+
+    return {
+      users: { admin, teacher, student, parent, total: admin + teacher + student + parent },
+      classes,
+      enrollments,
+      schoolAttendanceRateLast30Days: schoolAttendanceRate,
+      exams: { publishedCount: publishedExamsCount, totalAttempts, averageReleasedScore: avgReleasedScore },
+      recentAnnouncements,
+      feedbackByStatus: feedbackSummary,
+    };
   }
 
   async teacher(userId: string) {
@@ -102,7 +163,74 @@ export class DashboardsService {
   async student(userId: string) {
     const myEnrollments = await this.enr.count({ where: { studentId: userId, status: 'active' } });
     const unread = await this.notif.count({ where: { userId, readAt: IsNull() } });
-    return { activeEnrollments: myEnrollments, unreadNotifications: unread };
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const attFrom = thirtyDaysAgo.toISOString().split('T')[0];
+    const attStats = await this.attMarks
+      .createQueryBuilder('m')
+      .innerJoin('attendance_sessions', 's', 's.id = m.session_id')
+      .where('m.student_id = :sid', { sid: userId })
+      .andWhere('s.date >= :d', { d: attFrom })
+      .select('m.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('m.status')
+      .getRawMany();
+    const byStatus: Record<string, number> = {};
+    let totalAtt = 0;
+    let presentLike = 0;
+    for (const stat of attStats) {
+      const c = parseInt(stat.count, 10);
+      byStatus[stat.status] = c;
+      totalAtt += c;
+      if (stat.status === 'present' || stat.status === 'late') presentLike += c;
+    }
+    const attendanceSummaryLast30Days = {
+      totalMarks: totalAtt,
+      byStatus,
+      presentOrLateRate: totalAtt > 0 ? Math.round((presentLike / totalAtt) * 1000) / 1000 : null,
+    };
+
+    const enrollRows = await this.enr.find({ where: { studentId: userId, status: 'active' } });
+    const coIds = enrollRows.map((e) => e.classOfferingId);
+    const now = new Date();
+    const examQb = this.exams
+      .createQueryBuilder('e')
+      .where('e.published = :p', { p: true })
+      .andWhere('e.opens_at > :now', { now })
+      .orderBy('e.opens_at', 'ASC')
+      .take(5);
+    if (coIds.length) {
+      examQb.andWhere('(e.class_offering_id IS NULL OR e.class_offering_id IN (:...co))', { co: coIds });
+    } else {
+      examQb.andWhere('e.class_offering_id IS NULL');
+    }
+    const upcomingExams = await examQb.getMany();
+
+    const recentNotifications = await this.notif.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+      take: 5,
+    });
+
+    const testsTaken = await this.attempts.count({
+      where: { studentId: userId, submittedAt: Not(IsNull()) },
+    });
+
+    return {
+      activeEnrollments: myEnrollments,
+      unreadNotifications: unread,
+      attendanceSummaryLast30Days,
+      upcomingExams: upcomingExams.map((e) => ({
+        id: e.id,
+        title: e.title,
+        opensAt: e.opensAt,
+        closesAt: e.closesAt,
+        classOfferingId: e.classOfferingId,
+      })),
+      recentNotifications,
+      testsTaken,
+    };
   }
 
   async parent(userId: string) {
