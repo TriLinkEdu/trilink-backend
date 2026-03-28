@@ -21,6 +21,12 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { FilesModule } from './modules/files/files.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AiModule } from './modules/ai/ai.module';
+import { GamificationModule } from './modules/gamification/gamification.module';
+import { GoalsModule } from './modules/goals/goals.module';
+import { StudentProfilesModule } from './modules/student-profiles/student-profiles.module';
+import { ReportsModule } from './modules/reports/reports.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
 
 @Module({
   imports: [
@@ -45,6 +51,12 @@ import { AiModule } from './modules/ai/ai.module';
     SettingsModule,
     FilesModule,
     AiModule,
+    GamificationModule,
+    GoalsModule,
+    StudentProfilesModule,
+    ReportsModule,
+    AnalyticsModule,
+    IntegrationsModule,
   ],
 })
 export class AppModule {}

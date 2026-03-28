@@ -52,3 +52,13 @@ Adjust `git add` paths to match your working tree (`git status`).
 - **`GET /attempts/:id/for-grader`** — staff: answers + breakdown + student info (unreleased OK).
 - **On submit:** in-app notification to **exam creator** (`createdById`) for new submission.
 - **On first release:** notifications to **student** and each **linked parent** (`exam_result`).
+
+## Commit 7 — `feat: gamification, goals, profiles, reports, analytics, integrations`
+
+- **Gamification:** badges (seeded defaults), award, my badges / points, student badges for parents, exam-average leaderboard.
+- **Goals:** student CRUD; staff/parent read linked student’s goals.
+- **Student profiles:** `bio`, `avatarFileId`, `extraJson`; read rules same as goals.
+- **Reports:** `GET /reports/students/:id/performance`, `.../compare`, `GET /reports/parent/weekly-summary`.
+- **Analytics:** `GET /analytics/admin/summary` (feedback by status, exams, attempts, attendance last 30d).
+- **Integrations:** `GET /integrations/status`, `GET /integrations/sync-hints`.
+- **Questions:** optional `attachmentsJson` for images / file refs; LaTeX remains client-side in `stem`.

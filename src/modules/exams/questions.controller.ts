@@ -15,6 +15,12 @@ class QDto {
   @ApiProperty() @IsString() @MinLength(1) stem: string;
   @ApiPropertyOptional() @IsOptional() @IsString() optionsJson?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() answerKey?: string;
+  @ApiPropertyOptional({
+    description: 'JSON array of { fileId?, url?, kind?: "image" }; LaTeX in stem is client-rendered',
+  })
+  @IsOptional()
+  @IsString()
+  attachmentsJson?: string;
   @ApiProperty() @IsUUID() subjectId: string;
 }
 

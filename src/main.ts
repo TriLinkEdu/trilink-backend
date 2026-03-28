@@ -51,6 +51,12 @@ async function bootstrap() {
     .addTag('Files', 'Uploads and file metadata')
     .addTag('Admin', 'Audit logs and admin utilities')
     .addTag('AI (stub)', 'Placeholder responses until external ML service is integrated')
+    .addTag('Gamification', 'Badges, points, exam leaderboard')
+    .addTag('Student goals', 'Personal learning goals')
+    .addTag('Student profiles', 'Extended student profile fields')
+    .addTag('Reports', 'Performance, weekly parent summary, period comparison')
+    .addTag('Analytics', 'Admin school-wide metrics')
+    .addTag('Integrations', 'External services and sync hints')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig, {
     extraModels: [],

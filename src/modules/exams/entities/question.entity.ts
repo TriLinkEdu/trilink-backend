@@ -17,6 +17,10 @@ export class Question {
   @Column({ name: 'answer_key', type: 'text', nullable: true })
   answerKey: string | null;
 
+  /** JSON array of { fileId?, url?, kind?: \"image\" } for LaTeX use plain text in stem + delimiters client-side */
+  @Column({ name: 'attachments_json', type: 'text', nullable: true })
+  attachmentsJson: string | null;
+
   @Column({ name: 'subject_id', type: 'uuid' })
   subjectId: string;
 

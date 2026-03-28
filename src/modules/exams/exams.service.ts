@@ -80,6 +80,7 @@ export class ExamsService {
     stem: string;
     optionsJson?: string;
     answerKey?: string;
+    attachmentsJson?: string;
     subjectId: string;
     createdById: string;
   }) {
