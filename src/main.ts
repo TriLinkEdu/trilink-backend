@@ -33,6 +33,24 @@ async function bootstrap() {
       'JWT',
     )
     .addTag('Auth', 'Login, refresh tokens, and admin-only user registration')
+    .addTag('Users', 'User directory and profiles (admin)')
+    .addTag('Academic calendar', 'Academic years, terms, rollover, close')
+    .addTag('School structure', 'Grades, sections, subjects')
+    .addTag('Classes', 'Class offerings per year')
+    .addTag('Enrollments', 'Student enrollment')
+    .addTag('Parents', 'Parent–student links')
+    .addTag('Calendar', 'School / class events')
+    .addTag('Attendance', 'Sessions, marks, reports')
+    .addTag('Exams', 'Questions, exams, attempts, grading')
+    .addTag('Announcements', 'School announcements')
+    .addTag('Feedback', 'Feedback tickets')
+    .addTag('Notifications', 'In-app notifications')
+    .addTag('Chat', 'Conversations, messages, WebSocket')
+    .addTag('Dashboard', 'Role dashboards')
+    .addTag('Settings', 'User and school settings JSON')
+    .addTag('Files', 'Uploads and file metadata')
+    .addTag('Admin', 'Audit logs and admin utilities')
+    .addTag('AI (stub)', 'Placeholder responses until external ML service is integrated')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig, {
     extraModels: [],
