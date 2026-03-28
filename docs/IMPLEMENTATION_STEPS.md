@@ -45,3 +45,10 @@ git add src/modules/ai src/app.module.ts src/main.ts && git commit -m "feat(ai):
 ```
 
 Adjust `git add` paths to match your working tree (`git status`).
+
+## Commit 6 — `feat(exams): grader queue, for-grader detail, exam notifications`
+
+- **`GET /exams/:id/attempts`** — staff: list attempts (grading queue).
+- **`GET /attempts/:id/for-grader`** — staff: answers + breakdown + student info (unreleased OK).
+- **On submit:** in-app notification to **exam creator** (`createdById`) for new submission.
+- **On first release:** notifications to **student** and each **linked parent** (`exam_result`).

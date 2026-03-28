@@ -86,6 +86,16 @@ export class ExamsController {
     return this.exams.listExams(academicYearId);
   }
 
+  @Get(':id/attempts')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({
+    summary: 'List all student attempts for this exam (grading queue)',
+    description: 'Includes submission status, scores, and needsManualGrading. Staff only.',
+  })
+  listAttempts(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.exams.listAttemptsForExam(id, user);
+  }
+
   @Get(':id/results/export')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @ApiOperation({ summary: 'Download released results as CSV (all attempts)' })

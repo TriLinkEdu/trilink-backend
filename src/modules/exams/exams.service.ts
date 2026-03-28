@@ -13,6 +13,7 @@ import { ExamQuestion } from './entities/exam-question.entity';
 import { ExamAttempt } from './entities/exam-attempt.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export type ExamCreateInput = {
   title: string;
@@ -34,7 +35,34 @@ export class ExamsService {
     @InjectRepository(ExamAttempt) private readonly attRepo: Repository<ExamAttempt>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  private async notifyExamResultReleased(attempt: ExamAttempt, exam: Exam) {
+    const max = exam.maxPoints ?? 100;
+    const scoreLabel = attempt.score != null ? `${attempt.score} / ${max}` : `— / ${max}`;
+    const payload = JSON.stringify({
+      attemptId: attempt.id,
+      examId: exam.id,
+      score: attempt.score,
+      maxPoints: max,
+    });
+    await this.notifications.createForUser(attempt.studentId, {
+      type: 'exam_result',
+      title: 'Exam result published',
+      body: `Your result for "${exam.title}" is available (${scoreLabel}).`,
+      payloadJson: payload,
+    });
+    const links = await this.psRepo.find({ where: { studentId: attempt.studentId } });
+    for (const link of links) {
+      await this.notifications.createForUser(link.parentId, {
+        type: 'exam_result',
+        title: 'Your child\'s exam result',
+        body: `Result for "${exam.title}" is available (${scoreLabel}).`,
+        payloadJson: payload,
+      });
+    }
+  }
 
   private norm(s: unknown): string {
     if (s === undefined || s === null) return '';
@@ -225,7 +253,26 @@ export class ExamsService {
     a.submittedAt = new Date();
     await this.attRepo.save(a);
     await this.computeAndApplyAutoGrade(attemptId);
-    return this.attRepo.findOne({ where: { id: attemptId } });
+    const refreshed = await this.attRepo.findOne({ where: { id: attemptId } });
+    if (refreshed) {
+      const exam = await this.examRepo.findOne({ where: { id: refreshed.examId } });
+      if (exam) {
+        const student = await this.userRepo.findOne({ where: { id: refreshed.studentId } });
+        const name = student ? `${student.firstName} ${student.lastName}` : 'A student';
+        await this.notifications.createForUser(exam.createdById, {
+          type: 'exam_submission',
+          title: 'New exam submission',
+          body: `${name} submitted "${exam.title}".${refreshed.needsManualGrading ? ' Manual grading may be required.' : ''}`,
+          payloadJson: JSON.stringify({
+            attemptId: refreshed.id,
+            examId: exam.id,
+            studentId: refreshed.studentId,
+            needsManualGrading: refreshed.needsManualGrading,
+          }),
+        });
+      }
+    }
+    return refreshed;
   }
 
   async grade(attemptId: string, score: number, gradedById: string) {
@@ -246,8 +293,103 @@ export class ExamsService {
   async release(attemptId: string) {
     const a = await this.attRepo.findOne({ where: { id: attemptId } });
     if (!a) throw new NotFoundException('Attempt not found');
+    const alreadyReleased = !!a.releasedAt;
     a.releasedAt = new Date();
-    return this.attRepo.save(a);
+    const saved = await this.attRepo.save(a);
+    if (!alreadyReleased) {
+      const exam = await this.examRepo.findOne({ where: { id: a.examId } });
+      if (exam) await this.notifyExamResultReleased(saved, exam);
+    }
+    return saved;
+  }
+
+  async listAttemptsForExam(examId: string, viewer: User) {
+    if (viewer.role !== UserRole.ADMIN && viewer.role !== UserRole.TEACHER) {
+      throw new ForbiddenException('Only staff can list exam attempts');
+    }
+    await this.oneExam(examId);
+    const attempts = await this.attRepo.find({
+      where: { examId },
+      order: { submittedAt: 'DESC', createdAt: 'DESC' },
+    });
+    const out: Array<{
+      attemptId: string;
+      studentId: string;
+      studentEmail: string | null;
+      firstName: string | null;
+      lastName: string | null;
+      submittedAt: Date | null;
+      releasedAt: Date | null;
+      score: number | null;
+      autoScore: number | null;
+      needsManualGrading: boolean;
+    }> = [];
+    for (const a of attempts) {
+      const u = await this.userRepo.findOne({ where: { id: a.studentId } });
+      out.push({
+        attemptId: a.id,
+        studentId: a.studentId,
+        studentEmail: u?.email ?? null,
+        firstName: u?.firstName ?? null,
+        lastName: u?.lastName ?? null,
+        submittedAt: a.submittedAt,
+        releasedAt: a.releasedAt,
+        score: a.score,
+        autoScore: a.autoScore,
+        needsManualGrading: a.needsManualGrading,
+      });
+    }
+    return { examId, attempts: out };
+  }
+
+  async getAttemptForGrader(attemptId: string, viewer: User) {
+    if (viewer.role !== UserRole.ADMIN && viewer.role !== UserRole.TEACHER) {
+      throw new ForbiddenException('Only staff can review attempts');
+    }
+    const a = await this.attRepo.findOne({ where: { id: attemptId } });
+    if (!a) throw new NotFoundException('Attempt not found');
+    const exam = await this.examRepo.findOne({ where: { id: a.examId } });
+    if (!exam) throw new NotFoundException('Exam not found');
+    let answers: unknown = {};
+    try {
+      answers = JSON.parse(a.answersJson || '{}');
+    } catch {
+      answers = {};
+    }
+    let breakdown: unknown = null;
+    if (a.breakdownJson) {
+      try {
+        breakdown = JSON.parse(a.breakdownJson);
+      } catch {
+        breakdown = null;
+      }
+    }
+    const student = await this.userRepo.findOne({ where: { id: a.studentId } });
+    return {
+      attempt: {
+        id: a.id,
+        examId: a.examId,
+        studentId: a.studentId,
+        startedAt: a.startedAt,
+        submittedAt: a.submittedAt,
+        releasedAt: a.releasedAt,
+        score: a.score,
+        autoScore: a.autoScore,
+        needsManualGrading: a.needsManualGrading,
+        gradedById: a.gradedById,
+      },
+      exam: {
+        id: exam.id,
+        title: exam.title,
+        maxPoints: exam.maxPoints,
+        academicYearId: exam.academicYearId,
+      },
+      answers,
+      breakdown,
+      student: student
+        ? { id: student.id, email: student.email, firstName: student.firstName, lastName: student.lastName }
+        : null,
+    };
   }
 
   async assertCanViewAttempt(attempt: ExamAttempt, viewer: User) {

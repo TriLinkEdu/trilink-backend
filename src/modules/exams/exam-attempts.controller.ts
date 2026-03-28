@@ -63,8 +63,22 @@ export class ExamAttemptsController {
 
   @Post(':id/release')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({
+    summary: 'Release result to student and parents',
+    description: 'First release notifies the student and linked parents via in-app notifications.',
+  })
   release(@Param('id', ParseUUIDPipe) id: string) {
     return this.exams.release(id);
+  }
+
+  @Get(':id/for-grader')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({
+    summary: 'Full attempt for grading (answers + breakdown)',
+    description: 'Staff only. Works before or after release; includes parsed answers JSON.',
+  })
+  forGrader(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.exams.getAttemptForGrader(id, user);
   }
 
   @Get(':id/result')
