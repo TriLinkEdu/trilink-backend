@@ -27,9 +27,11 @@ import { StudentProfilesModule } from './modules/student-profiles/student-profil
 import { ReportsModule } from './modules/reports/reports.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
+    HealthModule,
     ConfigModule.forRoot({ isGlobal: true, load: [appConfig] }),
     DatabaseModule,
     AuditModule,

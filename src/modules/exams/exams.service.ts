@@ -14,6 +14,7 @@ import { ExamAttempt } from './entities/exam-attempt.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { GamificationService } from '../gamification/gamification.service';
 
 export type ExamCreateInput = {
   title: string;
@@ -36,7 +37,21 @@ export class ExamsService {
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
     private readonly notifications: NotificationsService,
+    private readonly gamification: GamificationService,
   ) {}
+
+  private assertExamEditor(exam: Exam, viewer: User) {
+    if (viewer.role === UserRole.ADMIN) return;
+    if (viewer.role === UserRole.TEACHER && exam.createdById === viewer.id) return;
+    throw new ForbiddenException('You can only manage exams you created');
+  }
+
+  private assertExamQuestionsVisible(exam: Exam, viewer: User) {
+    if (viewer.role === UserRole.ADMIN) return;
+    if (viewer.role === UserRole.TEACHER && exam.createdById === viewer.id) return;
+    if (viewer.role === UserRole.STUDENT && exam.published) return;
+    throw new ForbiddenException('Cannot view this exam questions');
+  }
 
   private async notifyExamResultReleased(attempt: ExamAttempt, exam: Exam) {
     const max = exam.maxPoints ?? 100;
@@ -114,35 +129,49 @@ export class ExamsService {
     );
   }
 
-  async updateExamMaxPoints(examId: string, maxPoints: number) {
+  async updateExamMaxPoints(examId: string, maxPoints: number, viewer: User) {
     const e = await this.oneExam(examId);
+    this.assertExamEditor(e, viewer);
     if (maxPoints < 1 || maxPoints > 10_000) throw new BadRequestException('maxPoints must be between 1 and 10000');
     e.maxPoints = maxPoints;
     return this.examRepo.save(e);
   }
 
-  listExams(yearId?: string) {
-    return yearId
-      ? this.examRepo.find({ where: { academicYearId: yearId }, order: { opensAt: 'DESC' } })
-      : this.examRepo.find({ order: { opensAt: 'DESC' } });
+  listExams(yearId: string | undefined, viewer: User) {
+    const qb = this.examRepo.createQueryBuilder('e').orderBy('e.opensAt', 'DESC');
+    if (yearId) qb.andWhere('e.academic_year_id = :y', { y: yearId });
+    if (viewer.role === UserRole.STUDENT) {
+      qb.andWhere('e.published = :pub', { pub: true });
+    } else if (viewer.role === UserRole.TEACHER) {
+      qb.andWhere('e.created_by_id = :uid', { uid: viewer.id });
+    }
+    return qb.getMany();
   }
   async oneExam(id: string) {
     const e = await this.examRepo.findOne({ where: { id } });
     if (!e) throw new NotFoundException('Exam not found');
     return e;
   }
-  async addQuestions(examId: string, items: { questionId: string; orderIndex: number; points: number }[]) {
-    await this.oneExam(examId);
+  async addQuestions(
+    examId: string,
+    items: { questionId: string; orderIndex: number; points: number }[],
+    viewer: User,
+  ) {
+    const ex = await this.oneExam(examId);
+    this.assertExamEditor(ex, viewer);
     for (const it of items) {
       await this.eqRepo.save(this.eqRepo.create({ examId, ...it }));
     }
     return this.eqRepo.find({ where: { examId }, order: { orderIndex: 'ASC' } });
   }
-  async listExamQuestions(examId: string) {
+  async listExamQuestions(examId: string, viewer: User) {
+    const ex = await this.oneExam(examId);
+    this.assertExamQuestionsVisible(ex, viewer);
     return this.eqRepo.find({ where: { examId }, order: { orderIndex: 'ASC' } });
   }
-  async publish(examId: string) {
+  async publish(examId: string, viewer: User) {
     const e = await this.oneExam(examId);
+    this.assertExamEditor(e, viewer);
     const n = await this.eqRepo.count({ where: { examId } });
     if (n === 0) throw new BadRequestException('Add questions before publish');
     e.published = true;
@@ -276,30 +305,34 @@ export class ExamsService {
     return refreshed;
   }
 
-  async grade(attemptId: string, score: number, gradedById: string) {
+  async grade(attemptId: string, score: number, viewer: User) {
     const a = await this.attRepo.findOne({ where: { id: attemptId } });
     if (!a) throw new NotFoundException('Attempt not found');
     if (!a.submittedAt) throw new BadRequestException('Not submitted yet');
     const exam = await this.examRepo.findOne({ where: { id: a.examId } });
     if (!exam) throw new NotFoundException('Exam not found');
+    this.assertExamEditor(exam, viewer);
     const max = exam.maxPoints ?? 100;
     if (score < 0 || score > max) {
       throw new BadRequestException(`Score must be between 0 and ${max} (exam maxPoints)`);
     }
     a.score = score;
-    a.gradedById = gradedById;
+    a.gradedById = viewer.id;
     return this.attRepo.save(a);
   }
 
-  async release(attemptId: string) {
+  async release(attemptId: string, viewer: User) {
     const a = await this.attRepo.findOne({ where: { id: attemptId } });
     if (!a) throw new NotFoundException('Attempt not found');
+    const exam = await this.examRepo.findOne({ where: { id: a.examId } });
+    if (!exam) throw new NotFoundException('Exam not found');
+    this.assertExamEditor(exam, viewer);
     const alreadyReleased = !!a.releasedAt;
     a.releasedAt = new Date();
     const saved = await this.attRepo.save(a);
     if (!alreadyReleased) {
-      const exam = await this.examRepo.findOne({ where: { id: a.examId } });
-      if (exam) await this.notifyExamResultReleased(saved, exam);
+      await this.notifyExamResultReleased(saved, exam);
+      await this.gamification.handleExamReleased(saved, exam);
     }
     return saved;
   }
@@ -308,7 +341,8 @@ export class ExamsService {
     if (viewer.role !== UserRole.ADMIN && viewer.role !== UserRole.TEACHER) {
       throw new ForbiddenException('Only staff can list exam attempts');
     }
-    await this.oneExam(examId);
+    const ex = await this.oneExam(examId);
+    this.assertExamEditor(ex, viewer);
     const attempts = await this.attRepo.find({
       where: { examId },
       order: { submittedAt: 'DESC', createdAt: 'DESC' },
@@ -351,6 +385,7 @@ export class ExamsService {
     if (!a) throw new NotFoundException('Attempt not found');
     const exam = await this.examRepo.findOne({ where: { id: a.examId } });
     if (!exam) throw new NotFoundException('Exam not found');
+    this.assertExamEditor(exam, viewer);
     let answers: unknown = {};
     try {
       answers = JSON.parse(a.answersJson || '{}');
@@ -439,8 +474,9 @@ export class ExamsService {
     };
   }
 
-  async exportExamResultsCsv(examId: string): Promise<string> {
-    await this.oneExam(examId);
+  async exportExamResultsCsv(examId: string, viewer: User): Promise<string> {
+    const ex = await this.oneExam(examId);
+    this.assertExamEditor(ex, viewer);
     const attempts = await this.attRepo.find({ where: { examId } });
     const released = attempts.filter((x) => x.releasedAt);
     const exam = await this.examRepo.findOne({ where: { id: examId } });

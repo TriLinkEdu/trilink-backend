@@ -6,10 +6,12 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { Badge } from './entities/badge.entity';
 import { UserBadge } from './entities/user-badge.entity';
 import { ExamAttempt } from '../exams/entities/exam-attempt.entity';
+import { Exam } from '../exams/entities/exam.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 
@@ -21,7 +23,45 @@ export class GamificationService implements OnModuleInit {
     @InjectRepository(ExamAttempt) private readonly attRepo: Repository<ExamAttempt>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  private readonly defaultBadges: Array<{
+    key: string;
+    name: string;
+    description: string | null;
+    iconKey: string | null;
+    pointsValue: number;
+  }> = [
+    {
+      key: 'first_steps',
+      name: 'First steps',
+      description: 'Welcome — keep learning.',
+      iconKey: 'star',
+      pointsValue: 5,
+    },
+    {
+      key: 'exam_hero',
+      name: 'Exam hero',
+      description: 'Scored 90%+ on a released exam.',
+      iconKey: 'trophy',
+      pointsValue: 25,
+    },
+    {
+      key: 'perfect_attendance_week',
+      name: 'Attendance star',
+      description: 'Present every session in a week.',
+      iconKey: 'calendar',
+      pointsValue: 15,
+    },
+    {
+      key: 'first_graded_exam',
+      name: 'First result',
+      description: 'Received your first released exam result.',
+      iconKey: 'ribbon',
+      pointsValue: 10,
+    },
+  ];
 
   async assertStudentViewer(viewer: User, studentId: string) {
     if (viewer.role === UserRole.ADMIN || viewer.role === UserRole.TEACHER) return;
@@ -34,31 +74,40 @@ export class GamificationService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    const n = await this.badgeRepo.count();
-    if (n > 0) return;
-    await this.badgeRepo.save([
-      this.badgeRepo.create({
-        key: 'first_steps',
-        name: 'First steps',
-        description: 'Welcome — keep learning.',
-        iconKey: 'star',
-        pointsValue: 5,
-      }),
-      this.badgeRepo.create({
-        key: 'exam_hero',
-        name: 'Exam hero',
-        description: 'Strong exam performance streak.',
-        iconKey: 'trophy',
-        pointsValue: 25,
-      }),
-      this.badgeRepo.create({
-        key: 'perfect_attendance_week',
-        name: 'Attendance star',
-        description: 'Present every session in a week.',
-        iconKey: 'calendar',
-        pointsValue: 15,
-      }),
-    ]);
+    for (const def of this.defaultBadges) {
+      const existing = await this.badgeRepo.findOne({ where: { key: def.key } });
+      if (!existing) await this.badgeRepo.save(this.badgeRepo.create(def));
+    }
+  }
+
+  /** Auto-awards from exam lifecycle (called by ExamsService). */
+  async handleExamReleased(attempt: ExamAttempt, exam: Exam) {
+    const studentId = attempt.studentId;
+    const releasedCount = await this.attRepo.count({
+      where: { studentId, releasedAt: Not(IsNull()) },
+    });
+    if (releasedCount === 1) {
+      await this.awardBadgeByKeyIfMissing(studentId, 'first_graded_exam', null);
+    }
+    const max = exam.maxPoints ?? 100;
+    if (attempt.score != null && max > 0 && attempt.score / max >= 0.9) {
+      await this.awardBadgeByKeyIfMissing(studentId, 'exam_hero', null);
+    }
+  }
+
+  async awardBadgeByKeyIfMissing(userId: string, badgeKey: string, awardedById: string | null): Promise<boolean> {
+    const badge = await this.badgeRepo.findOne({ where: { key: badgeKey } });
+    if (!badge) return false;
+    const dup = await this.ubRepo.findOne({ where: { userId, badgeId: badge.id } });
+    if (dup) return false;
+    await this.ubRepo.save(this.ubRepo.create({ userId, badgeId: badge.id, awardedById }));
+    await this.notifications.createForUser(userId, {
+      type: 'badge',
+      title: 'New badge',
+      body: `You earned "${badge.name}".`,
+      payloadJson: JSON.stringify({ badgeId: badge.id, badgeKey: badge.key }),
+    });
+    return true;
   }
 
   listBadges() {

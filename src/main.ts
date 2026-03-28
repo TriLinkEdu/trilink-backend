@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
@@ -10,7 +10,9 @@ async function bootstrap() {
   const port = config.get<number>('port') ?? 4000;
   const prefix = config.get<string>('apiPrefix') ?? 'api';
 
-  app.setGlobalPrefix(prefix);
+  app.setGlobalPrefix(prefix, {
+    exclude: [{ path: 'health', method: RequestMethod.GET }],
+  });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -57,6 +59,7 @@ async function bootstrap() {
     .addTag('Reports', 'Performance, weekly parent summary, period comparison')
     .addTag('Analytics', 'Admin school-wide metrics')
     .addTag('Integrations', 'External services and sync hints')
+    .addTag('Health', 'Liveness (no /api prefix)')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig, {
     extraModels: [],

@@ -58,17 +58,18 @@ export class ExamAttemptsController {
   @Post(':id/grade')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   grade(@Param('id', ParseUUIDPipe) id: string, @Body() dto: GradeDto, @CurrentUser() user: User) {
-    return this.exams.grade(id, dto.score, user.id);
+    return this.exams.grade(id, dto.score, user);
   }
 
   @Post(':id/release')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @ApiOperation({
     summary: 'Release result to student and parents',
-    description: 'First release notifies the student and linked parents via in-app notifications.',
+    description:
+      'First release notifies the student and linked parents; may auto-award badges. Only the exam creator (or admin) can release.',
   })
-  release(@Param('id', ParseUUIDPipe) id: string) {
-    return this.exams.release(id);
+  release(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.exams.release(id, user);
   }
 
   @Get(':id/for-grader')

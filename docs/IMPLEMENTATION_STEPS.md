@@ -62,3 +62,10 @@ Adjust `git add` paths to match your working tree (`git status`).
 - **Analytics:** `GET /analytics/admin/summary` (feedback by status, exams, attempts, attendance last 30d).
 - **Integrations:** `GET /integrations/status`, `GET /integrations/sync-hints`.
 - **Questions:** optional `attachmentsJson` for images / file refs; LaTeX remains client-side in `stem`.
+
+## Commit 8 — `feat: health probe, exam access control, auto-badges, teacher class list`
+
+- **`GET /health`** — no auth, **outside** `/api` prefix (for load balancers).
+- **Exams:** teachers only manage **their** exams (publish, patch, questions, grader, export, grade, release). Students only see **published** exams in list; question list requires published for students.
+- **Gamification:** upsert default badges (adds `first_graded_exam` if missing); on **first** result release → `first_graded_exam`; score ≥ **90%** of max → `exam_hero` (once); in-app **badge** notification.
+- **Classes:** **`GET /class-offerings/mine?academicYearId=`** for teachers (admin optional `teacherId`).

@@ -82,8 +82,13 @@ export class ExamsController {
 
   @Get()
   @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT)
-  list(@Query('academicYearId') academicYearId?: string) {
-    return this.exams.listExams(academicYearId);
+  @ApiOperation({
+    summary: 'List exams',
+    description:
+      'Admin: all exams (optional year). Teacher: only exams they created. Student: only published exams.',
+  })
+  list(@Query('academicYearId') academicYearId: string | undefined, @CurrentUser() user: User) {
+    return this.exams.listExams(academicYearId, user);
   }
 
   @Get(':id/attempts')
@@ -102,11 +107,12 @@ export class ExamsController {
   @Header('Content-Type', 'text/csv; charset=utf-8')
   async exportResults(
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
     @Query('format') format: string,
     @Res({ passthrough: true }) res: Response,
   ) {
     if (format && format !== 'csv') throw new BadRequestException('Only format=csv is supported');
-    const csv = await this.exams.exportExamResultsCsv(id);
+    const csv = await this.exams.exportExamResultsCsv(id, user);
     res.setHeader('Content-Disposition', `attachment; filename="exam-${id}-results.csv"`);
     return csv;
   }
@@ -114,26 +120,26 @@ export class ExamsController {
   @Patch(':id')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @ApiOperation({ summary: 'Update exam grading scale (maxPoints)' })
-  patchExam(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PatchExamDto) {
-    return this.exams.updateExamMaxPoints(id, dto.maxPoints);
+  patchExam(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PatchExamDto, @CurrentUser() user: User) {
+    return this.exams.updateExamMaxPoints(id, dto.maxPoints, user);
   }
 
   @Post(':id/questions')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
-  addQs(@Param('id', ParseUUIDPipe) id: string, @Body() body: ExamQBody) {
-    return this.exams.addQuestions(id, body.items);
+  addQs(@Param('id', ParseUUIDPipe) id: string, @Body() body: ExamQBody, @CurrentUser() user: User) {
+    return this.exams.addQuestions(id, body.items, user);
   }
 
   @Get(':id/questions')
   @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT)
-  listQs(@Param('id', ParseUUIDPipe) id: string) {
-    return this.exams.listExamQuestions(id);
+  listQs(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.exams.listExamQuestions(id, user);
   }
 
   @Post(':id/publish')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
-  publish(@Param('id', ParseUUIDPipe) id: string) {
-    return this.exams.publish(id);
+  publish(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.exams.publish(id, user);
   }
 
   @Post(':id/attempts')
