@@ -1,0 +1,134 @@
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Header,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
+import type { Response } from 'express';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsArray, IsNumber, IsOptional, IsString, IsUUID, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../users/entities/user.entity';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { User } from '../users/entities/user.entity';
+import { ExamsService } from './exams.service';
+
+class ExamDto {
+  @ApiProperty() @IsString() title: string;
+  @ApiProperty() @IsUUID() academicYearId: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsUUID() classOfferingId?: string;
+  @ApiProperty() @IsString() opensAt: string;
+  @ApiProperty() @IsString() closesAt: string;
+  @ApiProperty() @IsNumber() durationMinutes: number;
+  @ApiProperty({ required: false, default: 100, description: 'Scale for scores (auto + manual clamp to this)' })
+  @IsOptional()
+  @IsNumber()
+  maxPoints?: number;
+}
+
+class PatchExamDto {
+  @ApiProperty({ description: 'Grading scale (max score for this exam)' })
+  @IsNumber()
+  maxPoints: number;
+}
+
+class ExamQItem {
+  @ApiProperty() @IsUUID() questionId: string;
+  @ApiProperty() @IsNumber() orderIndex: number;
+  @ApiProperty() @IsNumber() points: number;
+}
+class ExamQBody {
+  @ApiProperty({ type: [ExamQItem] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ExamQItem)
+  items: ExamQItem[];
+}
+
+@ApiTags('Exams')
+@Controller('exams')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth('JWT')
+export class ExamsController {
+  constructor(private readonly exams: ExamsService) {}
+
+  @Post()
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({ summary: 'Create exam draft' })
+  create(@Body() dto: ExamDto, @CurrentUser() user: User) {
+    return this.exams.createExam({
+      title: dto.title,
+      academicYearId: dto.academicYearId,
+      classOfferingId: dto.classOfferingId ?? null,
+      opensAt: new Date(dto.opensAt),
+      closesAt: new Date(dto.closesAt),
+      durationMinutes: dto.durationMinutes,
+      createdById: user.id,
+      maxPoints: dto.maxPoints,
+    });
+  }
+
+  @Get()
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT)
+  list(@Query('academicYearId') academicYearId?: string) {
+    return this.exams.listExams(academicYearId);
+  }
+
+  @Get(':id/results/export')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({ summary: 'Download released results as CSV (all attempts)' })
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  async exportResults(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('format') format: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (format && format !== 'csv') throw new BadRequestException('Only format=csv is supported');
+    const csv = await this.exams.exportExamResultsCsv(id);
+    res.setHeader('Content-Disposition', `attachment; filename="exam-${id}-results.csv"`);
+    return csv;
+  }
+
+  @Patch(':id')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({ summary: 'Update exam grading scale (maxPoints)' })
+  patchExam(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PatchExamDto) {
+    return this.exams.updateExamMaxPoints(id, dto.maxPoints);
+  }
+
+  @Post(':id/questions')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  addQs(@Param('id', ParseUUIDPipe) id: string, @Body() body: ExamQBody) {
+    return this.exams.addQuestions(id, body.items);
+  }
+
+  @Get(':id/questions')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT)
+  listQs(@Param('id', ParseUUIDPipe) id: string) {
+    return this.exams.listExamQuestions(id);
+  }
+
+  @Post(':id/publish')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  publish(@Param('id', ParseUUIDPipe) id: string) {
+    return this.exams.publish(id);
+  }
+
+  @Post(':id/attempts')
+  @Roles(UserRole.STUDENT)
+  startAttempt(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.exams.startAttempt(id, user.id);
+  }
+}

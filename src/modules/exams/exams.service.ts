@@ -1,0 +1,353 @@
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Question } from './entities/question.entity';
+import { Exam } from './entities/exam.entity';
+import { ExamQuestion } from './entities/exam-question.entity';
+import { ExamAttempt } from './entities/exam-attempt.entity';
+import { User, UserRole } from '../users/entities/user.entity';
+import { ParentStudent } from '../parent-students/entities/parent-student.entity';
+
+export type ExamCreateInput = {
+  title: string;
+  academicYearId: string;
+  classOfferingId: string | null;
+  opensAt: Date;
+  closesAt: Date;
+  durationMinutes: number;
+  createdById: string;
+  maxPoints?: number;
+};
+
+@Injectable()
+export class ExamsService {
+  constructor(
+    @InjectRepository(Question) private readonly qRepo: Repository<Question>,
+    @InjectRepository(Exam) private readonly examRepo: Repository<Exam>,
+    @InjectRepository(ExamQuestion) private readonly eqRepo: Repository<ExamQuestion>,
+    @InjectRepository(ExamAttempt) private readonly attRepo: Repository<ExamAttempt>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+    @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
+  ) {}
+
+  private norm(s: unknown): string {
+    if (s === undefined || s === null) return '';
+    return String(s).trim().toLowerCase();
+  }
+
+  private autoGradableType(type: string): boolean {
+    const t = this.norm(type);
+    return t === 'mcq' || t === 'true_false' || t === 'true-false';
+  }
+
+  // Questions
+  async createQuestion(body: {
+    type: string;
+    stem: string;
+    optionsJson?: string;
+    answerKey?: string;
+    subjectId: string;
+    createdById: string;
+  }) {
+    return this.qRepo.save(this.qRepo.create(body));
+  }
+  listQuestions(subjectId?: string) {
+    return subjectId
+      ? this.qRepo.find({ where: { subjectId }, order: { createdAt: 'DESC' } })
+      : this.qRepo.find({ order: { createdAt: 'DESC' } });
+  }
+  async removeQuestion(id: string) {
+    const q = await this.qRepo.findOne({ where: { id } });
+    if (!q) throw new NotFoundException('Question not found');
+    await this.qRepo.remove(q);
+  }
+
+  // Exams
+  async createExam(body: ExamCreateInput) {
+    return this.examRepo.save(
+      this.examRepo.create({
+        title: body.title,
+        academicYearId: body.academicYearId,
+        classOfferingId: body.classOfferingId,
+        opensAt: body.opensAt,
+        closesAt: body.closesAt,
+        durationMinutes: body.durationMinutes,
+        createdById: body.createdById,
+        maxPoints: body.maxPoints ?? 100,
+        published: false,
+      }),
+    );
+  }
+
+  async updateExamMaxPoints(examId: string, maxPoints: number) {
+    const e = await this.oneExam(examId);
+    if (maxPoints < 1 || maxPoints > 10_000) throw new BadRequestException('maxPoints must be between 1 and 10000');
+    e.maxPoints = maxPoints;
+    return this.examRepo.save(e);
+  }
+
+  listExams(yearId?: string) {
+    return yearId
+      ? this.examRepo.find({ where: { academicYearId: yearId }, order: { opensAt: 'DESC' } })
+      : this.examRepo.find({ order: { opensAt: 'DESC' } });
+  }
+  async oneExam(id: string) {
+    const e = await this.examRepo.findOne({ where: { id } });
+    if (!e) throw new NotFoundException('Exam not found');
+    return e;
+  }
+  async addQuestions(examId: string, items: { questionId: string; orderIndex: number; points: number }[]) {
+    await this.oneExam(examId);
+    for (const it of items) {
+      await this.eqRepo.save(this.eqRepo.create({ examId, ...it }));
+    }
+    return this.eqRepo.find({ where: { examId }, order: { orderIndex: 'ASC' } });
+  }
+  async listExamQuestions(examId: string) {
+    return this.eqRepo.find({ where: { examId }, order: { orderIndex: 'ASC' } });
+  }
+  async publish(examId: string) {
+    const e = await this.oneExam(examId);
+    const n = await this.eqRepo.count({ where: { examId } });
+    if (n === 0) throw new BadRequestException('Add questions before publish');
+    e.published = true;
+    return this.examRepo.save(e);
+  }
+
+  async startAttempt(examId: string, studentId: string) {
+    const e = await this.oneExam(examId);
+    if (!e.published) throw new BadRequestException('Exam not published');
+    const now = new Date();
+    if (now < e.opensAt || now > e.closesAt) throw new BadRequestException('Outside exam window');
+    const u = await this.userRepo.findOne({ where: { id: studentId } });
+    if (!u || u.role !== UserRole.STUDENT) throw new BadRequestException('Must be student');
+    const dup = await this.attRepo.findOne({ where: { examId, studentId } });
+    if (dup) throw new ConflictException('Attempt already exists');
+    return this.attRepo.save(
+      this.attRepo.create({
+        examId,
+        studentId,
+        startedAt: now,
+        answersJson: '{}',
+        needsManualGrading: false,
+      }),
+    );
+  }
+
+  async saveAnswers(attemptId: string, answersJson: string) {
+    const a = await this.attRepo.findOne({ where: { id: attemptId } });
+    if (!a) throw new NotFoundException('Attempt not found');
+    if (a.submittedAt) throw new BadRequestException('Already submitted');
+    a.answersJson = answersJson;
+    return this.attRepo.save(a);
+  }
+
+  private async computeAndApplyAutoGrade(attemptId: string) {
+    const a = await this.attRepo.findOne({ where: { id: attemptId } });
+    if (!a?.submittedAt) return;
+    const exam = await this.examRepo.findOne({ where: { id: a.examId } });
+    if (!exam) return;
+    const rows = await this.eqRepo.find({ where: { examId: a.examId }, order: { orderIndex: 'ASC' } });
+    let answers: Record<string, string> = {};
+    try {
+      answers = JSON.parse(a.answersJson || '{}');
+    } catch {
+      answers = {};
+    }
+
+    const perQuestion: Array<{
+      questionId: string;
+      pointsMax: number;
+      pointsEarned: number;
+      autoGraded: boolean;
+    }> = [];
+
+    let needsManual = false;
+    let totalWeight = 0;
+    let earnedWeight = 0;
+
+    for (const row of rows) {
+      const q = await this.qRepo.findOne({ where: { id: row.questionId } });
+      if (!q) continue;
+      totalWeight += row.points;
+      const raw = answers[q.id];
+      const hasAnswer = raw !== undefined && raw !== null && String(raw).trim() !== '';
+
+      let earned = 0;
+      let autoGraded = false;
+      if (this.autoGradableType(q.type) && q.answerKey != null && q.answerKey !== '') {
+        autoGraded = true;
+        if (hasAnswer && this.norm(raw) === this.norm(q.answerKey)) {
+          earned = row.points;
+        }
+      } else {
+        needsManual = true;
+        earned = 0;
+      }
+      earnedWeight += earned;
+      perQuestion.push({
+        questionId: q.id,
+        pointsMax: row.points,
+        pointsEarned: earned,
+        autoGraded,
+      });
+    }
+
+    const maxPoints = exam.maxPoints ?? 100;
+    const scaled =
+      totalWeight > 0 ? Math.round((earnedWeight / totalWeight) * maxPoints * 100) / 100 : 0;
+
+    const breakdown = {
+      examMaxPoints: maxPoints,
+      totalQuestionPoints: totalWeight,
+      weightedEarned: earnedWeight,
+      perQuestion,
+      computedAutoScore: scaled,
+    };
+
+    a.autoScore = scaled;
+    a.breakdownJson = JSON.stringify(breakdown);
+    a.needsManualGrading = needsManual;
+    a.score = scaled;
+    await this.attRepo.save(a);
+  }
+
+  async submit(attemptId: string) {
+    const a = await this.attRepo.findOne({ where: { id: attemptId } });
+    if (!a) throw new NotFoundException('Attempt not found');
+    if (a.submittedAt) throw new BadRequestException('Already submitted');
+    a.submittedAt = new Date();
+    await this.attRepo.save(a);
+    await this.computeAndApplyAutoGrade(attemptId);
+    return this.attRepo.findOne({ where: { id: attemptId } });
+  }
+
+  async grade(attemptId: string, score: number, gradedById: string) {
+    const a = await this.attRepo.findOne({ where: { id: attemptId } });
+    if (!a) throw new NotFoundException('Attempt not found');
+    if (!a.submittedAt) throw new BadRequestException('Not submitted yet');
+    const exam = await this.examRepo.findOne({ where: { id: a.examId } });
+    if (!exam) throw new NotFoundException('Exam not found');
+    const max = exam.maxPoints ?? 100;
+    if (score < 0 || score > max) {
+      throw new BadRequestException(`Score must be between 0 and ${max} (exam maxPoints)`);
+    }
+    a.score = score;
+    a.gradedById = gradedById;
+    return this.attRepo.save(a);
+  }
+
+  async release(attemptId: string) {
+    const a = await this.attRepo.findOne({ where: { id: attemptId } });
+    if (!a) throw new NotFoundException('Attempt not found');
+    a.releasedAt = new Date();
+    return this.attRepo.save(a);
+  }
+
+  async assertCanViewAttempt(attempt: ExamAttempt, viewer: User) {
+    if (viewer.role === UserRole.ADMIN || viewer.role === UserRole.TEACHER) {
+      return;
+    }
+    if (viewer.role === UserRole.STUDENT && attempt.studentId === viewer.id) {
+      return;
+    }
+    if (viewer.role === UserRole.PARENT) {
+      const link = await this.psRepo.findOne({ where: { parentId: viewer.id, studentId: attempt.studentId } });
+      if (link) return;
+    }
+    throw new ForbiddenException('Cannot view this attempt');
+  }
+
+  async getResult(attemptId: string, viewer: User) {
+    const a = await this.attRepo.findOne({ where: { id: attemptId } });
+    if (!a) throw new NotFoundException('Attempt not found');
+    if (!a.releasedAt) throw new BadRequestException('Result not released');
+    await this.assertCanViewAttempt(a, viewer);
+    const exam = await this.examRepo.findOne({ where: { id: a.examId } });
+    let breakdown: unknown = null;
+    if (a.breakdownJson) {
+      try {
+        breakdown = JSON.parse(a.breakdownJson);
+      } catch {
+        breakdown = null;
+      }
+    }
+    const student = await this.userRepo.findOne({ where: { id: a.studentId } });
+    return {
+      attemptId: a.id,
+      examId: a.examId,
+      examTitle: exam?.title ?? null,
+      maxPoints: exam?.maxPoints ?? 100,
+      score: a.score,
+      autoScore: a.autoScore,
+      needsManualGrading: a.needsManualGrading,
+      submittedAt: a.submittedAt,
+      releasedAt: a.releasedAt,
+      breakdown,
+      student: student
+        ? { id: student.id, firstName: student.firstName, lastName: student.lastName, email: student.email }
+        : null,
+    };
+  }
+
+  async exportExamResultsCsv(examId: string): Promise<string> {
+    await this.oneExam(examId);
+    const attempts = await this.attRepo.find({ where: { examId } });
+    const released = attempts.filter((x) => x.releasedAt);
+    const exam = await this.examRepo.findOne({ where: { id: examId } });
+    const max = exam?.maxPoints ?? 100;
+    const lines = [
+      'attemptId,studentId,studentEmail,firstName,lastName,score,maxPoints,autoScore,needsManualGrading,releasedAt',
+    ];
+    for (const a of released) {
+      const u = await this.userRepo.findOne({ where: { id: a.studentId } });
+      lines.push(
+        [
+          a.id,
+          a.studentId,
+          u?.email ?? '',
+          u?.firstName ?? '',
+          u?.lastName ?? '',
+          a.score ?? '',
+          max,
+          a.autoScore ?? '',
+          a.needsManualGrading ? 'yes' : 'no',
+          a.releasedAt?.toISOString() ?? '',
+        ]
+          .map((c) => `"${String(c).replace(/"/g, '""')}"`)
+          .join(','),
+      );
+    }
+    return lines.join('\n');
+  }
+
+  async exportAttemptCsv(attemptId: string, viewer: User): Promise<string> {
+    const a = await this.attRepo.findOne({ where: { id: attemptId } });
+    if (!a) throw new NotFoundException('Attempt not found');
+    if (!a.releasedAt) throw new BadRequestException('Result not released');
+    await this.assertCanViewAttempt(a, viewer);
+    const exam = await this.examRepo.findOne({ where: { id: a.examId } });
+    const u = await this.userRepo.findOne({ where: { id: a.studentId } });
+    const max = exam?.maxPoints ?? 100;
+    const lines = [
+      'field,value',
+      `"attemptId","${a.id}"`,
+      `"examId","${a.examId}"`,
+      `"examTitle","${(exam?.title ?? '').replace(/"/g, '""')}"`,
+      `"studentId","${a.studentId}"`,
+      `"studentEmail","${(u?.email ?? '').replace(/"/g, '""')}"`,
+      `"score","${a.score ?? ''}"`,
+      `"maxPoints","${max}"`,
+      `"autoScore","${a.autoScore ?? ''}"`,
+      `"needsManualGrading","${a.needsManualGrading ? 'yes' : 'no'}"`,
+      `"releasedAt","${a.releasedAt?.toISOString() ?? ''}"`,
+    ];
+    return lines.join('\n');
+  }
+}
