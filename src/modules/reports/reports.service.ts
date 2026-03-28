@@ -1,12 +1,15 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 import { AttendanceMark } from '../attendance/entities/attendance-mark.entity';
 import { AttendanceSession } from '../attendance/entities/attendance-session.entity';
 import { ExamAttempt } from '../exams/entities/exam-attempt.entity';
 import { Exam } from '../exams/entities/exam.entity';
+import { Enrollment } from '../enrollments/entities/enrollment.entity';
+import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
+import { Subject } from '../school-structure/entities/subject.entity';
 
 @Injectable()
 export class ReportsService {
@@ -17,6 +20,9 @@ export class ReportsService {
     @InjectRepository(AttendanceSession) private readonly sessRepo: Repository<AttendanceSession>,
     @InjectRepository(ExamAttempt) private readonly attRepo: Repository<ExamAttempt>,
     @InjectRepository(Exam) private readonly examRepo: Repository<Exam>,
+    @InjectRepository(Enrollment) private readonly enrRepo: Repository<Enrollment>,
+    @InjectRepository(ClassOffering) private readonly coRepo: Repository<ClassOffering>,
+    @InjectRepository(Subject) private readonly subjectRepo: Repository<Subject>,
   ) {}
 
   async assertStudentViewer(viewer: User, studentId: string) {
@@ -211,5 +217,55 @@ export class ReportsService {
     const ids = links.map((l) => l.studentId);
     if (ids.length === 0) return null;
     return this.buildWeeklySnapshotForStudentIds(ids);
+  }
+
+  /** Released exam scores grouped by subject (from enrolled class offerings). */
+  async myGradesBySubject(viewer: User) {
+    if (viewer.role !== UserRole.STUDENT) throw new ForbiddenException('Students only');
+    const studentId = viewer.id;
+    const enrollments = await this.enrRepo.find({ where: { studentId, status: 'active' } });
+    const coIds = enrollments.map((e) => e.classOfferingId);
+    if (!coIds.length) return { studentId, subjects: [] as unknown[] };
+
+    const offerings = await this.coRepo.find({ where: { id: In(coIds) } });
+    const coToSubject = new Map(offerings.map((o) => [o.id, o.subjectId]));
+    const subjectIds = [...new Set(offerings.map((o) => o.subjectId))];
+    const subjects = await this.subjectRepo.find({ where: { id: In(subjectIds) } });
+    const subjectName = new Map(subjects.map((s) => [s.id, s.name]));
+
+    const bySubject = new Map<
+      string,
+      { subjectId: string; subjectName: string; exams: unknown[] }
+    >();
+    for (const sid of subjectIds) {
+      bySubject.set(sid, {
+        subjectId: sid,
+        subjectName: subjectName.get(sid) ?? 'Unknown',
+        exams: [],
+      });
+    }
+
+    const attempts = await this.attRepo.find({ where: { studentId }, order: { releasedAt: 'DESC' } });
+    const coIdSet = new Set(coIds);
+    for (const a of attempts) {
+      if (!a.releasedAt || a.score == null) continue;
+      const exam = await this.examRepo.findOne({ where: { id: a.examId } });
+      if (!exam?.classOfferingId || !coIdSet.has(exam.classOfferingId)) continue;
+      const subjId = coToSubject.get(exam.classOfferingId);
+      if (!subjId) continue;
+      const bucket = bySubject.get(subjId);
+      if (bucket) {
+        bucket.exams.push({
+          attemptId: a.id,
+          examId: exam.id,
+          title: exam.title,
+          score: a.score,
+          maxPoints: exam.maxPoints,
+          releasedAt: a.releasedAt,
+        });
+      }
+    }
+
+    return { studentId, subjects: [...bySubject.values()] };
   }
 }

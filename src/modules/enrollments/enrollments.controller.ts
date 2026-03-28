@@ -6,6 +6,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { User } from '../users/entities/user.entity';
 import { EnrollmentsService } from './enrollments.service';
 
 class EnrollDto {
@@ -30,6 +32,20 @@ export class EnrollmentsController {
     @Query('academicYearId') academicYearId?: string,
   ) {
     return this.svc.list({ studentId, classOfferingId, academicYearId });
+  }
+
+  @Get('mine')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'My active enrollments with class, subject, teacher' })
+  mine(@CurrentUser() user: User) {
+    return this.svc.listMine(user.id);
+  }
+
+  @Get('children/:studentId')
+  @Roles(UserRole.PARENT)
+  @ApiOperation({ summary: 'Linked child enrollments (subject / teacher detail)' })
+  childEnrollments(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
+    return this.svc.listForParentChild(user.id, studentId);
   }
 
   @Post()

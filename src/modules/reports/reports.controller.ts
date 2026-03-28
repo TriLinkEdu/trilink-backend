@@ -55,4 +55,11 @@ export class ReportsController {
   weekly(@CurrentUser() user: User, @Query('childStudentId') childId?: string) {
     return this.reports.weeklyParentSummary(user, childId);
   }
+
+  @Get('my-grades')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'Grades by subject (released exams in enrolled classes)' })
+  myGrades(@CurrentUser() user: User) {
+    return this.reports.myGradesBySubject(user);
+  }
 }
