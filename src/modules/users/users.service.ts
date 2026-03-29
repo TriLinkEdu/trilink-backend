@@ -1,15 +1,23 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User, UserRole } from './entities/user.entity';
 import { RegisterByAdminDto } from './dto/register-by-admin.dto';
+import { ParentStudentsService } from '../parent-students/parent-students.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    private readonly parentStudents: ParentStudentsService,
   ) {}
 
   async findByEmail(email: string): Promise<User | null> {
@@ -66,6 +74,16 @@ export class UsersService {
     }
 
     const saved = await this.userRepo.save(user);
+
+    if (role === UserRole.PARENT && dto.linkedStudentId) {
+      await this.parentStudents.create({
+        parentId: saved.id,
+        studentId: dto.linkedStudentId,
+        relationship: dto.relationship!,
+        isPrimary: dto.isPrimaryLink ?? false,
+      });
+    }
+
     (saved as any).tempPassword = tempPassword;
     return saved;
   }
@@ -77,5 +95,65 @@ export class UsersService {
 
   async validatePassword(user: User, plainPassword: string): Promise<boolean> {
     return bcrypt.compare(plainPassword, user.passwordHash);
+  }
+
+  toPublic(u: User) {
+    const { passwordHash: _p, ...rest } = u;
+    return rest;
+  }
+
+  async listUsers(filters: { role?: UserRole; q?: string }): Promise<Partial<User>[]> {
+    const qb = this.userRepo.createQueryBuilder('u').orderBy('u.createdAt', 'DESC');
+    if (filters.role) qb.andWhere('u.role = :role', { role: filters.role });
+    if (filters.q) {
+      const s = `%${filters.q}%`;
+      qb.andWhere('(u.email LIKE :s OR u.first_name LIKE :s OR u.last_name LIKE :s)', { s });
+    }
+    const rows = await qb.getMany();
+    return rows.map((u) => this.toPublic(u) as User);
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    if (currentPassword === newPassword) {
+      throw new BadRequestException('New password must be different from the current password');
+    }
+    const u = await this.findById(userId);
+    if (!u) throw new NotFoundException('User not found');
+    const valid = await this.validatePassword(u, currentPassword);
+    if (!valid) throw new UnauthorizedException('Current password is incorrect');
+    u.passwordHash = await bcrypt.hash(newPassword, 10);
+    u.mustChangePassword = false;
+    await this.userRepo.save(u);
+    return { ok: true as const };
+  }
+
+  async patchUser(
+    id: string,
+    body: Partial<Pick<User, 'firstName' | 'lastName' | 'phone' | 'grade' | 'section' | 'subject' | 'department' | 'childName' | 'relationship'>>,
+  ) {
+    const u = await this.findById(id);
+    if (!u) throw new NotFoundException('User not found');
+
+    const keys = [
+      'firstName',
+      'lastName',
+      'phone',
+      'grade',
+      'section',
+      'subject',
+      'department',
+      'childName',
+      'relationship',
+    ] as const satisfies readonly (keyof User)[];
+
+    for (const key of keys) {
+      const v = body[key];
+      if (v !== undefined && v !== null) {
+        (u as Record<(typeof keys)[number], unknown>)[key] = v;
+      }
+    }
+
+    const saved = await this.userRepo.save(u);
+    return this.toPublic(saved) as User;
   }
 }

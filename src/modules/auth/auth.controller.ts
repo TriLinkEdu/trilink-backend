@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -18,6 +18,9 @@ import { RolesGuard } from './guards/roles.guard';
 import { Roles } from './decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
 import { ErrorResponseDto } from '../../common/dto/error-response.dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { User } from '../users/entities/user.entity';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -100,13 +103,42 @@ export class AuthController {
     return this.authService.refresh(dto.refreshToken);
   }
 
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary: 'Current user profile',
+    description: 'Returns the authenticated user (no password). Use after login or to refresh client-side profile.',
+  })
+  @ApiResponse({ status: 200, description: 'Public user fields' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid JWT', type: ErrorResponseDto })
+  me(@CurrentUser() user: User) {
+    return this.usersService.toPublic(user);
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary: 'Change password',
+    description: 'Requires current password. Clears mustChangePassword after success.',
+  })
+  @ApiBody({ type: ChangePasswordDto })
+  @ApiResponse({ status: 200, schema: { example: { ok: true } } })
+  @ApiResponse({ status: 401, description: 'Wrong current password', type: ErrorResponseDto })
+  @ApiResponse({ status: 400, description: 'Validation or same-as-current password', type: ErrorResponseDto })
+  changePassword(@CurrentUser() user: User, @Body() dto: ChangePasswordDto) {
+    return this.usersService.changePassword(user.id, dto.currentPassword, dto.newPassword);
+  }
+
   @Post('register')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT')
   @ApiOperation({
     summary: 'Register user (admin only)',
-    description: 'Register a new student, teacher, or parent. Requires admin JWT. Optional tempPassword; if omitted, server generates one. Role-specific fields: student (grade, section), teacher (subject, department), parent (childName, relationship).',
+    description:
+      'Register a new student, teacher, or parent. Requires admin JWT. Optional tempPassword; if omitted, server generates one. Role-specific fields: student (grade, section), teacher (subject, department), parent (linkedStudentId + relationship to link unambiguously, or register without link and use POST /parent-students). childName is optional display only.',
   })
   @ApiBody({
     type: RegisterByAdminDto,
@@ -136,15 +168,16 @@ export class AuthController {
         },
       },
       parent: {
-        summary: 'Register parent',
+        summary: 'Register parent (link by student id)',
         value: {
           email: 'parent@example.com',
           firstName: 'Abebe',
           lastName: 'Kebede',
           phone: '+251933456789',
           type: 'parent',
-          childName: 'John Doe',
+          linkedStudentId: '550e8400-e29b-41d4-a716-446655440002',
           relationship: 'Father',
+          isPrimaryLink: true,
         },
       },
     },
