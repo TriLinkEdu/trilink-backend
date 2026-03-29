@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import appConfig from './config/app.config';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -28,11 +31,25 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { HealthModule } from './modules/health/health.module';
+import { DigestModule } from './modules/digest/digest.module';
 
 @Module({
   imports: [
-    HealthModule,
     ConfigModule.forRoot({ isGlobal: true, load: [appConfig] }),
+    HealthModule,
+    ScheduleModule.forRoot(),
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        throttlers: [
+          {
+            ttl: config.get<number>('throttle.ttl') ?? 60000,
+            limit: config.get<number>('throttle.limit') ?? 150,
+          },
+        ],
+      }),
+    }),
     DatabaseModule,
     AuditModule,
     AuthModule,
@@ -59,6 +76,8 @@ import { HealthModule } from './modules/health/health.module';
     ReportsModule,
     AnalyticsModule,
     IntegrationsModule,
+    DigestModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

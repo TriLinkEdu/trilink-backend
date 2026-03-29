@@ -69,3 +69,12 @@ Adjust `git add` paths to match your working tree (`git status`).
 - **Exams:** teachers only manage **their** exams (publish, patch, questions, grader, export, grade, release). Students only see **published** exams in list; question list requires published for students.
 - **Gamification:** upsert default badges (adds `first_graded_exam` if missing); on **first** result release → `first_graded_exam`; score ≥ **90%** of max → `exam_hero` (once); in-app **badge** notification.
 - **Classes:** **`GET /class-offerings/mine?academicYearId=`** for teachers (admin optional `teacherId`).
+
+## Commit 9 — `feat: class detail for teachers, attendance badge, digest, throttle, CORS, ETag`
+
+- **`GET /class-offerings/:id`** — teacher sees offering only if `teacherId` matches; admin sees any.
+- **Gamification:** after saving attendance marks, evaluate **ISO week** (Mon–Sun UTC) for that class; all **past** sessions in the week with **present/late** for the student → award **`perfect_attendance_week`** once (if not already held).
+- **Digest:** `DigestModule` + `ScheduleModule` — **Monday 08:00 UTC** cron sends in-app **`weekly_digest`** notifications to each parent with linked students (`WEEKLY_DIGEST_ENABLED=false` to disable).
+- **Throttling:** global `ThrottlerGuard` (`THROTTLE_TTL_MS`, `THROTTLE_LIMIT`); **`@SkipThrottle()`** on **`GET /health`**.
+- **CORS:** optional **`CORS_ORIGIN`** (comma-separated); unset keeps permissive dev behavior.
+- **Reports:** `ReportsService` exported; **`EtagInterceptor`** on report GETs (`If-None-Match` → **304**).

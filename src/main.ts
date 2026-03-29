@@ -21,7 +21,12 @@ async function bootstrap() {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
-  app.enableCors({ origin: true }); // configure for production
+  const corsList = config.get<string[] | null>('corsOrigin');
+  if (corsList?.length) {
+    app.enableCors({ origin: corsList, credentials: true });
+  } else {
+    app.enableCors({ origin: true });
+  }
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('TriLink API')

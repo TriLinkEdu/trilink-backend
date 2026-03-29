@@ -1,4 +1,4 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Query, UseGuards, UseInterceptors } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -7,10 +7,12 @@ import { UserRole } from '../users/entities/user.entity';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { ReportsService } from './reports.service';
+import { EtagInterceptor } from '../../common/interceptors/etag.interceptor';
 
 @ApiTags('Reports')
 @Controller('reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@UseInterceptors(EtagInterceptor)
 @ApiBearerAuth('JWT')
 export class ReportsController {
   constructor(private readonly reports: ReportsService) {}

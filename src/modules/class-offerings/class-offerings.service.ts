@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClassOffering } from './entities/class-offering.entity';
@@ -26,6 +26,13 @@ export class ClassOfferingsService {
     const o = await this.repo.findOne({ where: { id } });
     if (!o) throw new NotFoundException('Class offering not found');
     return o;
+  }
+
+  async oneForViewer(id: string, viewer: User) {
+    const o = await this.one(id);
+    if (viewer.role === UserRole.ADMIN) return o;
+    if (viewer.role === UserRole.TEACHER && o.teacherId === viewer.id) return o;
+    throw new ForbiddenException('Cannot view this class offering');
   }
 
   async create(body: {

@@ -6,7 +6,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Not, Repository } from 'typeorm';
+import { Between, IsNull, Not, Repository } from 'typeorm';
 import { Badge } from './entities/badge.entity';
 import { UserBadge } from './entities/user-badge.entity';
 import { ExamAttempt } from '../exams/entities/exam-attempt.entity';
@@ -14,6 +14,8 @@ import { Exam } from '../exams/entities/exam.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
+import { AttendanceSession } from '../attendance/entities/attendance-session.entity';
+import { AttendanceMark } from '../attendance/entities/attendance-mark.entity';
 
 @Injectable()
 export class GamificationService implements OnModuleInit {
@@ -23,6 +25,8 @@ export class GamificationService implements OnModuleInit {
     @InjectRepository(ExamAttempt) private readonly attRepo: Repository<ExamAttempt>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
+    @InjectRepository(AttendanceSession) private readonly attendanceSessRepo: Repository<AttendanceSession>,
+    @InjectRepository(AttendanceMark) private readonly attendanceMarkRepo: Repository<AttendanceMark>,
     private readonly notifications: NotificationsService,
   ) {}
 
@@ -81,6 +85,43 @@ export class GamificationService implements OnModuleInit {
   }
 
   /** Auto-awards from exam lifecycle (called by ExamsService). */
+  /** ISO week (Mon–Sun, UTC) for this class: all past sessions in range have present/late → badge once. */
+  async afterAttendanceMarksSaved(classOfferingId: string, sessionDate: string, studentIds: string[]) {
+    if (!studentIds.length) return;
+    const { start, end } = this.isoWeekRangeMondaySunday(sessionDate);
+    const today = new Date().toISOString().slice(0, 10);
+    const weekSessions = await this.attendanceSessRepo.find({
+      where: { classOfferingId, date: Between(start, end) },
+      order: { date: 'ASC' },
+    });
+    const pastSessions = weekSessions.filter((s) => s.date <= today);
+    if (pastSessions.length === 0) return;
+    const sessionIds = pastSessions.map((s) => s.id);
+    for (const studentId of new Set(studentIds)) {
+      let ok = true;
+      for (const sid of sessionIds) {
+        const mark = await this.attendanceMarkRepo.findOne({ where: { sessionId: sid, studentId } });
+        if (!mark || (mark.status !== 'present' && mark.status !== 'late')) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) await this.awardBadgeByKeyIfMissing(studentId, 'perfect_attendance_week', null);
+    }
+  }
+
+  private isoWeekRangeMondaySunday(dateStr: string): { start: string; end: string } {
+    const d = new Date(`${dateStr}T12:00:00.000Z`);
+    const dow = d.getUTCDay();
+    const toMonday = dow === 0 ? -6 : 1 - dow;
+    const mon = new Date(d);
+    mon.setUTCDate(d.getUTCDate() + toMonday);
+    const sun = new Date(mon);
+    sun.setUTCDate(mon.getUTCDate() + 6);
+    const fmt = (x: Date) => x.toISOString().slice(0, 10);
+    return { start: fmt(mon), end: fmt(sun) };
+  }
+
   async handleExamReleased(attempt: ExamAttempt, exam: Exam) {
     const studentId = attempt.studentId;
     const releasedCount = await this.attRepo.count({

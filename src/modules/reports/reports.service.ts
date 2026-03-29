@@ -153,7 +153,7 @@ export class ReportsService {
       if (!childStudentId) throw new BadRequestException('childStudentId query required for admin');
       const u = await this.userRepo.findOne({ where: { id: childStudentId } });
       if (!u || u.role !== UserRole.STUDENT) throw new NotFoundException('Student not found');
-      return this.buildWeeklyForStudents([childStudentId]);
+      return this.buildWeeklySnapshotForStudentIds([childStudentId]);
     }
     if (viewer.role !== UserRole.PARENT) {
       throw new ForbiddenException('Parents only (or admin with childStudentId)');
@@ -164,10 +164,11 @@ export class ReportsService {
       if (!ids.includes(childStudentId)) throw new ForbiddenException('Not linked to this student');
       ids = [childStudentId];
     }
-    return this.buildWeeklyForStudents(ids);
+    return this.buildWeeklySnapshotForStudentIds(ids);
   }
 
-  private async buildWeeklyForStudents(studentIds: string[]) {
+  /** Used by HTTP weekly summary and scheduled parent digest. */
+  async buildWeeklySnapshotForStudentIds(studentIds: string[]) {
     const now = new Date();
     const weekAgo = new Date(now);
     weekAgo.setDate(weekAgo.getDate() - 7);
@@ -203,5 +204,12 @@ export class ReportsService {
       generatedAt: now.toISOString(),
       children,
     };
+  }
+
+  async buildWeeklyDigestForParent(parentId: string) {
+    const links = await this.psRepo.find({ where: { parentId } });
+    const ids = links.map((l) => l.studentId);
+    if (ids.length === 0) return null;
+    return this.buildWeeklySnapshotForStudentIds(ids);
   }
 }

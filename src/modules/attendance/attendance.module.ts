@@ -5,6 +5,7 @@ import { AttendanceMark } from './entities/attendance-mark.entity';
 import { Enrollment } from '../enrollments/entities/enrollment.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { GamificationModule } from '../gamification/gamification.module';
 import { AttendanceService } from './attendance.service';
 import { AttendanceController } from './attendance.controller';
 
@@ -12,6 +13,7 @@ import { AttendanceController } from './attendance.controller';
   imports: [
     TypeOrmModule.forFeature([AttendanceSession, AttendanceMark, Enrollment, ParentStudent]),
     NotificationsModule,
+    GamificationModule,
   ],
   controllers: [AttendanceController],
   providers: [AttendanceService],

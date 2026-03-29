@@ -20,12 +20,26 @@ export default () => {
   },
   jwt: {
     secret: process.env.JWT_SECRET || 'change-me-in-production',
-    accessExpires: process.env.JWT_ACCESS_EXPIRES || '15m',
+    accessExpires: process.env.JWT_ACCESS_EXPIRES || '1d',
     refreshExpires: process.env.JWT_REFRESH_EXPIRES || '7d',
   },
   seed: {
     adminEmail: process.env.SEED_ADMIN_EMAIL || 'admin@trilink.edu',
     adminPassword: process.env.SEED_ADMIN_PASSWORD || 'Admin@123',
+  },
+  /** Comma-separated origins, or omit for reflect-all (dev). Production: set explicitly. */
+  corsOrigin:
+    process.env.CORS_ORIGIN === undefined || process.env.CORS_ORIGIN === ''
+      ? null
+      : process.env.CORS_ORIGIN.split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+  throttle: {
+    ttl: parseInt(process.env.THROTTLE_TTL_MS || '60000', 10),
+    limit: parseInt(process.env.THROTTLE_LIMIT || '150', 10),
+  },
+  digest: {
+    enabled: process.env.WEEKLY_DIGEST_ENABLED !== 'false',
   },
 };
 };

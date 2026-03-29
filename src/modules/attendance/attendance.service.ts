@@ -6,6 +6,7 @@ import { AttendanceMark } from './entities/attendance-mark.entity';
 import { Enrollment } from '../enrollments/entities/enrollment.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { GamificationService } from '../gamification/gamification.service';
 
 @Injectable()
 export class AttendanceService {
@@ -15,6 +16,7 @@ export class AttendanceService {
     @InjectRepository(Enrollment) private readonly enrRepo: Repository<Enrollment>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
     private readonly notifications: NotificationsService,
+    private readonly gamification: GamificationService,
   ) {}
 
   async createSession(body: { classOfferingId: string; date: string; takenById: string }) {
@@ -55,6 +57,9 @@ export class AttendanceService {
         });
       }
     }
+
+    const touched = [...new Set(marks.map((m) => m.studentId))];
+    await this.gamification.afterAttendanceMarksSaved(session.classOfferingId, session.date, touched);
 
     return this.markRepo.find({ where: { sessionId } });
   }

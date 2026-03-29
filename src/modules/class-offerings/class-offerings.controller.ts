@@ -65,9 +65,13 @@ export class ClassOfferingsController {
   }
 
   @Get(':id')
-  @Roles(UserRole.ADMIN)
-  one(@Param('id', ParseUUIDPipe) id: string) {
-    return this.svc.one(id);
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({
+    summary: 'Get one class offering',
+    description: 'Admin: any offering. Teacher: only if assigned as teacher.',
+  })
+  one(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.svc.oneForViewer(id, user);
   }
 
   @Post()

@@ -5,13 +5,23 @@ import { UserBadge } from './entities/user-badge.entity';
 import { ExamAttempt } from '../exams/entities/exam-attempt.entity';
 import { User } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
+import { AttendanceSession } from '../attendance/entities/attendance-session.entity';
+import { AttendanceMark } from '../attendance/entities/attendance-mark.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { GamificationService } from './gamification.service';
 import { GamificationController } from './gamification.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Badge, UserBadge, ExamAttempt, User, ParentStudent]),
+    TypeOrmModule.forFeature([
+      Badge,
+      UserBadge,
+      ExamAttempt,
+      User,
+      ParentStudent,
+      AttendanceSession,
+      AttendanceMark,
+    ]),
     NotificationsModule,
   ],
   controllers: [GamificationController],
