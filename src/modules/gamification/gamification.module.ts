@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Badge } from './entities/badge.entity';
 import { UserBadge } from './entities/user-badge.entity';
+import { LoginStreak } from './entities/login-streak.entity';
 import { ExamAttempt } from '../exams/entities/exam-attempt.entity';
 import { User } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
@@ -21,6 +22,7 @@ import { GamificationController } from './gamification.controller';
       ParentStudent,
       AttendanceSession,
       AttendanceMark,
+      LoginStreak,
     ]),
     NotificationsModule,
   ],

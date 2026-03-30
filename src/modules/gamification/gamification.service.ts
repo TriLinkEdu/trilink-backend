@@ -16,6 +16,7 @@ import { User, UserRole } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 import { AttendanceSession } from '../attendance/entities/attendance-session.entity';
 import { AttendanceMark } from '../attendance/entities/attendance-mark.entity';
+import { LoginStreak } from './entities/login-streak.entity';
 
 @Injectable()
 export class GamificationService implements OnModuleInit {
@@ -27,6 +28,7 @@ export class GamificationService implements OnModuleInit {
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
     @InjectRepository(AttendanceSession) private readonly attendanceSessRepo: Repository<AttendanceSession>,
     @InjectRepository(AttendanceMark) private readonly attendanceMarkRepo: Repository<AttendanceMark>,
+    @InjectRepository(LoginStreak) private readonly streakRepo: Repository<LoginStreak>,
     private readonly notifications: NotificationsService,
   ) {}
 
@@ -237,5 +239,72 @@ export class GamificationService implements OnModuleInit {
   async totalBadgePointsForViewer(studentId: string, viewer: User) {
     await this.assertStudentViewer(viewer, studentId);
     return this.totalBadgePoints(studentId);
+  }
+
+  private utcDateString(d: Date): string {
+    return d.toISOString().slice(0, 10);
+  }
+
+  /** Call after successful password login (not refresh). */
+  async recordLogin(userId: string): Promise<LoginStreak> {
+    const today = this.utcDateString(new Date());
+    let row = await this.streakRepo.findOne({ where: { userId } });
+    if (!row) {
+      return this.streakRepo.save(
+        this.streakRepo.create({
+          userId,
+          currentStreak: 1,
+          longestStreak: 1,
+          lastLoginDate: today,
+        }),
+      );
+    }
+    if (row.lastLoginDate === today) return row;
+
+    const y = new Date();
+    y.setUTCDate(y.getUTCDate() - 1);
+    const yesterday = this.utcDateString(y);
+
+    if (row.lastLoginDate === yesterday) {
+      row.currentStreak += 1;
+    } else {
+      row.currentStreak = 1;
+    }
+    row.lastLoginDate = today;
+    row.longestStreak = Math.max(row.longestStreak, row.currentStreak);
+    return this.streakRepo.save(row);
+  }
+
+  async getLoginStreak(userId: string) {
+    const row = await this.streakRepo.findOne({ where: { userId } });
+    return {
+      userId,
+      currentStreak: row?.currentStreak ?? 0,
+      longestStreak: row?.longestStreak ?? 0,
+      lastLoginDate: row?.lastLoginDate ?? null,
+    };
+  }
+
+  async leaderboardStreaks(limit = 20) {
+    const take = Math.min(Math.max(limit, 1), 100);
+    const rows = await this.streakRepo.find({
+      order: { currentStreak: 'DESC', longestStreak: 'DESC' },
+      take,
+    });
+    const entries = [];
+    let rank = 1;
+    for (const r of rows) {
+      const u = await this.userRepo.findOne({ where: { id: r.userId } });
+      entries.push({
+        rank: rank++,
+        userId: r.userId,
+        currentStreak: r.currentStreak,
+        longestStreak: r.longestStreak,
+        user: u
+          ? { firstName: u.firstName, lastName: u.lastName, email: u.email, role: u.role }
+          : null,
+      });
+    }
+    return { metric: 'loginStreak', entries };
   }
 }
