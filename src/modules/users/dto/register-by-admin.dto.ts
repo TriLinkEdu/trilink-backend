@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, IsUUID, MinLength, ValidateIf } from 'class-validator';
 
 export enum RegisterRole {
   STUDENT = 'student',
@@ -55,19 +55,40 @@ export class RegisterByAdminDto {
   @IsString()
   department?: string;
 
-  @ApiPropertyOptional({ example: 'Jane Doe', description: 'Child full name; required for type=parent' })
+  @ApiPropertyOptional({
+    description:
+      'Optional label only — never unique. To tie this parent to a student, use linkedStudentId (and relationship) or POST /parent-students after register.',
+  })
   @IsOptional()
   @IsString()
   childName?: string;
 
   @ApiPropertyOptional({
+    description:
+      'Student user id to link when registering a parent. Use this instead of childName so the correct student is chosen when names duplicate.',
+  })
+  @ValidateIf((o) => o.type === RegisterRole.PARENT)
+  @IsOptional()
+  @IsUUID()
+  linkedStudentId?: string;
+
+  @ApiPropertyOptional({
     example: 'Father',
-    description: 'Relationship to child; required for type=parent',
+    description: 'Relationship to the student. Required when linkedStudentId is set; stored on the parent–student link.',
     enum: ['Father', 'Mother', 'Guardian'],
   })
-  @IsOptional()
+  @ValidateIf((o) => o.type === RegisterRole.PARENT && !!o.linkedStudentId)
   @IsString()
+  @MinLength(1)
   relationship?: string;
+
+  @ApiPropertyOptional({
+    description: 'When linkedStudentId is set: mark this link as primary (default false).',
+  })
+  @ValidateIf((o) => o.type === RegisterRole.PARENT && !!o.linkedStudentId)
+  @IsOptional()
+  @IsBoolean()
+  isPrimaryLink?: boolean;
 
   @ApiPropertyOptional({
     example: 'TempPass123',

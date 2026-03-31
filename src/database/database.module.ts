@@ -3,7 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import { User } from '../modules/users/entities/user.entity';
+import { TYPEORM_ENTITIES } from './typeorm-entities';
 
 @Module({
   imports: [
@@ -11,7 +11,7 @@ import { User } from '../modules/users/entities/user.entity';
       useFactory: (config: ConfigService) => {
         const dbType = config.get<string>('database.type') || 'sqlite';
         const common = {
-          entities: [User],
+          entities: TYPEORM_ENTITIES,
           synchronize: process.env.NODE_ENV !== 'production',
           logging: process.env.NODE_ENV === 'development',
         };
@@ -37,7 +37,6 @@ import { User } from '../modules/users/entities/user.entity';
       },
       inject: [ConfigService],
     }),
-    TypeOrmModule.forFeature([User]),
   ],
   exports: [TypeOrmModule],
 })
