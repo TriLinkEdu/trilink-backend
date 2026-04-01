@@ -53,6 +53,15 @@ export class AiController {
     return this.ai.learningPath(studentId, user);
   }
 
+  @Get('students/:studentId/evaluate')
+  @ApiOperation({
+    summary: 'Evaluate Me — summary from attendance, exams, and login streak',
+    description: 'Student (self), linked parent, teacher, or admin.',
+  })
+  evaluate(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
+    return this.ai.evaluateMe(studentId, user);
+  }
+
   @Post('feedback-assistant')
   @ApiOperation({ summary: 'Draft / tone assist for teacher communications (stub)' })
   @ApiBody({ type: FeedbackAssistantDto })
