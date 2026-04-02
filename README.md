@@ -5,35 +5,50 @@ NestJS API for the TriLink school management platform. Provides authentication a
 ## Stack
 
 - **NestJS** – API framework
-- **SQLite (dev default) / PostgreSQL (production)** – TypeORM
+- **PostgreSQL** – TypeORM (default). Optional **SQLite** file DB via `DB_TYPE=sqlite` for local/mobile-style tooling only.
 - **JWT** – Access + refresh tokens
 - **Swagger** – API docs at `/api-docs`
 - **class-validator** – DTO validation
 
 ## Setup
 
-1. **Install dependencies**
+1. **Environment**
+   - Create **`.env`** from **`.env.example`** (`.env` is gitignored). Defaults match **Docker Compose** Postgres (`trilink` / `trilink_secret` / database `trilink`).
+
+2. **Install dependencies**
    ```bash
    npm install
    ```
 
-2. **Database**
-   - **Development (default):** No PostgreSQL needed. With `NODE_ENV=development` (or unset), the app uses **SQLite** at `data/trilink.sqlite` unless you set `DB_TYPE=postgres`.
-   - **PostgreSQL:** Set `DB_TYPE=postgres` in `.env` and configure `DB_HOST`, `DB_USERNAME`, `DB_PASSWORD`, `DB_DATABASE` (create the user/database first).
-   - Copy `.env.example` to `.env` and set `JWT_SECRET` (and DB vars if using Postgres).
+3. **Database — pick one**
 
-3. **Run**
+   **A. Docker (recommended)** — Postgres + API in containers:
+   ```bash
+   docker compose up --build
+   ```
+   - API: `http://localhost:4000/api` · Swagger: `/api-docs`
+   - Postgres is mapped to host port **5433** (not 5432) so it does not conflict with a local PostgreSQL install.
+   - First-time admin (uses the `seed` service on the same Docker network as `db`):
+     ```bash
+     docker compose --profile seed run --rm seed
+     ```
+   - **Postgres only** (Nest on the host): `docker compose up -d db`, then in `.env` use `DB_HOST=localhost` and **`DB_PORT=5433`**, then `npm run start:dev`.
+
+   **B. Local Postgres** — create user/database matching `.env`, then `npm run start:dev`.
+
+   **C. SQLite (optional)** — `DB_TYPE=sqlite` + `DB_SQLITE_PATH` for file-based / tooling only.
+
+4. **Run (without Docker for the API)**
    ```bash
    npm run start:dev
    ```
    - API: `http://localhost:4000/api`
    - Swagger: `http://localhost:4000/api-docs`
 
-4. **Seed admin** (first time only)
-   ```bash
-   npm run seed
-   ```
-   Uses `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` from `.env` (default: `admin@trilink.edu` / `Admin@123`).
+5. **Seed admin** (first time only)
+   - On host: `npm run seed`
+   - After `docker compose up`: `docker compose --profile seed run --rm seed`
+   - Uses `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` from `.env` (default: `admin@trilink.edu` / `Admin@123`).
 
 ## Roadmap (30 steps)
 
@@ -90,4 +105,4 @@ src/
 ## Web / Mobile
 
 - **Web:** Point Next.js API proxy or `fetch` to `http://localhost:4000/api` (e.g. `POST /api/auth/login`, `POST /api/auth/register` with Bearer token).
-- **Mobile:** Set `ApiConstants.baseUrl` to `http://<host>:4000/api` and use `/auth/login`, `/auth/register`, `/auth/refresh`.
+- **Mobile:** Set `ApiConstants.baseUrl` to `http://<host>:4000/api` and use `/auth/login`, `/auth/register`, `/auth/refresh`. On-device storage (e.g. SQLite in the app) is separate from this server, which targets **PostgreSQL**.

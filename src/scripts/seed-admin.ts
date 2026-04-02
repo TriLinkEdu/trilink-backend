@@ -1,19 +1,32 @@
 /**
  * Seeds the initial admin user. Run after DB is up:
  *   npm run seed
- * Requires: .env with SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD; DB_* for postgres or DB_TYPE=sqlite
+ * Requires: .env with SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD; DB_* for PostgreSQL (default) or DB_TYPE=sqlite for file DB
  */
 import 'dotenv/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import { TYPEORM_ENTITIES } from '../database/typeorm-entities';
+import { getPostgresConnectionFromEnv } from '../database/postgres-env';
 import { User, UserRole } from '../modules/users/entities/user.entity';
 
+/**
+ * Schema sync for this run:
+ * - Dev (NODE_ENV !== production): on (same as Nest DatabaseModule).
+ * - Production: off unless SEED_SYNC_SCHEMA=true (use once on empty Neon / hosted DB).
+ * - SEED_SYNC_SCHEMA=false: never sync (overrides dev).
+ */
+function seedSynchronize(): boolean {
+  const explicit = process.env.SEED_SYNC_SCHEMA?.toLowerCase();
+  if (explicit === 'false' || explicit === '0') return false;
+  if (explicit === 'true' || explicit === '1') return true;
+  return process.env.NODE_ENV !== 'production';
+}
+
 async function seed() {
-  const nodeEnv = process.env.NODE_ENV || 'development';
-  const defaultDbType = nodeEnv === 'production' ? 'postgres' : 'sqlite';
-  const dbType = process.env.DB_TYPE || defaultDbType;
+  const dbType = process.env.DB_TYPE || 'postgres';
   const config =
     dbType === 'sqlite'
       ? (() => {
@@ -23,19 +36,15 @@ async function seed() {
           return {
             type: 'better-sqlite3' as const,
             database: sqlitePath,
-            entities: [User],
-            synchronize: false,
+            entities: TYPEORM_ENTITIES,
+            synchronize: seedSynchronize(),
           };
         })()
       : {
           type: 'postgres' as const,
-          host: process.env.DB_HOST || 'localhost',
-          port: parseInt(process.env.DB_PORT || '5432', 10),
-          username: process.env.DB_USERNAME || 'trilink',
-          password: process.env.DB_PASSWORD || 'trilink_secret',
-          database: process.env.DB_DATABASE || 'trilink',
-          entities: [User],
-          synchronize: false,
+          ...getPostgresConnectionFromEnv(),
+          entities: TYPEORM_ENTITIES,
+          synchronize: seedSynchronize(),
         };
 
   const dataSource = new DataSource(config);
@@ -72,7 +81,13 @@ async function seed() {
   process.exit(0);
 }
 
-seed().catch((err) => {
+seed().catch((err: unknown) => {
   console.error(err);
+  const msg = err && typeof err === 'object' && 'message' in err ? String((err as Error).message) : '';
+  if (msg.includes('does not exist') || msg.includes('42P01')) {
+    console.error(
+      '\nHint: empty database with no tables. Either start the API once with NODE_ENV=development (synchronize), or run seed with SEED_SYNC_SCHEMA=true once, then remove it.\n',
+    );
+  }
   process.exit(1);
 });

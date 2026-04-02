@@ -14,10 +14,10 @@ export class Exam {
   @Column({ name: 'class_offering_id', type: 'uuid', nullable: true })
   classOfferingId: string | null;
 
-  @Column({ name: 'opens_at', type: 'datetime' })
+  @Column({ name: 'opens_at', type: 'timestamp' })
   opensAt: Date;
 
-  @Column({ name: 'closes_at', type: 'datetime' })
+  @Column({ name: 'closes_at', type: 'timestamp' })
   closesAt: Date;
 
   @Column({ name: 'duration_minutes', type: 'int' })

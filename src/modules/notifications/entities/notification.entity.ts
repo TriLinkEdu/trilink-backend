@@ -20,7 +20,7 @@ export class Notification {
   @Column({ name: 'payload_json', type: 'text', nullable: true })
   payloadJson: string | null;
 
-  @Column({ name: 'read_at', type: 'datetime', nullable: true })
+  @Column({ name: 'read_at', type: 'timestamp', nullable: true })
   readAt: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })

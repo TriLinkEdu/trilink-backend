@@ -12,10 +12,10 @@ export class ExamAttempt {
   @Column({ name: 'student_id', type: 'uuid' })
   studentId: string;
 
-  @Column({ name: 'started_at', type: 'datetime' })
+  @Column({ name: 'started_at', type: 'timestamp' })
   startedAt: Date;
 
-  @Column({ name: 'submitted_at', type: 'datetime', nullable: true })
+  @Column({ name: 'submitted_at', type: 'timestamp', nullable: true })
   submittedAt: Date | null;
 
   @Column({ name: 'answers_json', type: 'text', default: '{}' })
@@ -34,7 +34,7 @@ export class ExamAttempt {
   @Column({ name: 'needs_manual_grading', type: 'boolean', default: false })
   needsManualGrading: boolean;
 
-  @Column({ name: 'released_at', type: 'datetime', nullable: true })
+  @Column({ name: 'released_at', type: 'timestamp', nullable: true })
   releasedAt: Date | null;
 
   @Column({ name: 'graded_by_id', type: 'uuid', nullable: true })
