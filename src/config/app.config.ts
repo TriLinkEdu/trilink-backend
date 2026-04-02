@@ -1,9 +1,7 @@
 export default () => {
   const nodeEnv = process.env.NODE_ENV || 'development';
-  // Local dev: SQLite by default (no PostgreSQL setup). Production: PostgreSQL unless DB_TYPE is set.
-  const defaultDbType =
-    nodeEnv === 'production' ? 'postgres' : 'sqlite';
-  const dbType = (process.env.DB_TYPE || defaultDbType) as 'postgres' | 'sqlite';
+  // Primary database: PostgreSQL. Set DB_TYPE=sqlite only for file-based / embedded-style local runs (e.g. mobile dev tooling).
+  const dbType = (process.env.DB_TYPE || 'postgres') as 'postgres' | 'sqlite';
 
   return {
   nodeEnv,
@@ -11,6 +9,8 @@ export default () => {
   apiPrefix: process.env.API_PREFIX || 'api',
   database: {
     type: dbType,
+    /** Set for Neon / managed Postgres; when set, DB_HOST/DB_PORT/… are ignored by TypeORM. */
+    url: process.env.DATABASE_URL?.trim() || undefined,
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '5432', 10),
     username: process.env.DB_USERNAME || 'trilink',

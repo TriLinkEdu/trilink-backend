@@ -4,12 +4,13 @@ import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import { TYPEORM_ENTITIES } from './typeorm-entities';
+import { getPostgresConnectionFromEnv } from './postgres-env';
 
 @Module({
   imports: [
     TypeOrmModule.forRootAsync({
       useFactory: (config: ConfigService) => {
-        const dbType = config.get<string>('database.type') || 'sqlite';
+        const dbType = config.get<string>('database.type') || 'postgres';
         const common = {
           entities: TYPEORM_ENTITIES,
           synchronize: process.env.NODE_ENV !== 'production',
@@ -25,13 +26,10 @@ import { TYPEORM_ENTITIES } from './typeorm-entities';
             ...common,
           };
         }
+        const pg = getPostgresConnectionFromEnv();
         return {
           type: 'postgres',
-          host: config.get<string>('database.host'),
-          port: config.get<number>('database.port'),
-          username: config.get<string>('database.username'),
-          password: config.get<string>('database.password'),
-          database: config.get<string>('database.database'),
+          ...pg,
           ...common,
         };
       },
