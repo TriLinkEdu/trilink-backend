@@ -1,0 +1,95 @@
+# `docker compose up --build` → Postgres + Nest API + Next web (if ../triLink-web/web exists).
+# Backend only (no sibling web repo): `docker compose up --build db api`
+# Web: http://localhost:3000 — browser calls API at http://localhost:4000 (published from `api`).
+#
+# Neon / external Postgres: set DATABASE_URL in `.env` (see .env.example). Start API without local db:
+#   docker compose up -d --build --no-deps api
+#   docker compose run --rm --no-deps seed
+#
+# Postgres is published on host port 5433 so it does not clash with a local Postgres on 5432.
+# Containers still connect to db:5432 on the internal network.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trilink
+      POSTGRES_PASSWORD: trilink_secret
+      POSTGRES_DB: trilink
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - trilink_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trilink -d trilink"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - trilink
+
+  api:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USERNAME: trilink
+      DB_PASSWORD: trilink_secret
+      DB_DATABASE: trilink
+      DB_TYPE: postgres
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - trilink
+
+  # One-shot admin seed (same image & DB settings as api). Do not use `docker compose run api` for seed — use this service.
+  seed:
+    profiles: ["seed"]
+    build: .
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USERNAME: trilink
+      DB_PASSWORD: trilink_secret
+      DB_DATABASE: trilink
+      DB_TYPE: postgres
+    depends_on:
+      db:
+        condition: service_healthy
+    command: npm run seed:prod
+    networks:
+      - trilink
+
+  # Next.js — context: sibling folder ../triLink-web/web (see comment above)
+  web:
+    build:
+      context: ../triLink-web/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - trilink
+
+networks:
+  trilink:
+    driver: bridge
+
+volumes:
+  trilink_pgdata:
