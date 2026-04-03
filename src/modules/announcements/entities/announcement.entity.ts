@@ -23,6 +23,14 @@ export class Announcement {
   @Column({ name: 'author_id', type: 'uuid' })
   authorId: string;
 
+  /** If set, announcement is hidden from students/parents until this time (UTC). */
+  @Column({ name: 'publish_at', type: 'timestamp', nullable: true })
+  publishAt: Date | null;
+
+  /** After scheduled realtime fire (or immediate create). */
+  @Column({ name: 'realtime_sent', type: 'boolean', default: false })
+  realtimeSent: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

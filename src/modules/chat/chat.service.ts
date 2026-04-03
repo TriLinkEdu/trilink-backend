@@ -23,8 +23,9 @@ export class ChatService {
     if (!m) throw new ForbiddenException('Not a member');
   }
 
-  /** Read: member, or parent with parentVisible + linked child is a member. */
+  /** Read: member, or parent with parentVisible + linked child is a member, or admin. */
   async assertReadAccess(conversationId: string, user: User) {
+    if (user.role === UserRole.ADMIN) return;
     const m = await this.memRepo.findOne({ where: { conversationId, userId: user.id } });
     if (m) return;
     if (user.role !== UserRole.PARENT) throw new ForbiddenException('Not a member');
@@ -103,5 +104,9 @@ export class ChatService {
       order: { createdAt: 'DESC' },
       take: limit,
     });
+  }
+
+  async listAllConversations() {
+    return this.convRepo.find({ order: { updatedAt: 'DESC' } });
   }
 }
