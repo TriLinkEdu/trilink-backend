@@ -48,6 +48,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - trilink_uploads:/app/uploads
     networks:
       - trilink
 
@@ -93,3 +95,4 @@ networks:
 
 volumes:
   trilink_pgdata:
+  trilink_uploads:
