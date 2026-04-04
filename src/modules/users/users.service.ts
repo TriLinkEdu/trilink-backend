@@ -24,6 +24,11 @@ export class UsersService {
     return this.userRepo.findOne({ where: { email: email.toLowerCase() } });
   }
 
+  async findByPhone(phone: string): Promise<User | null> {
+    if (!phone) return null;
+    return this.userRepo.findOne({ where: { phone } });
+  }
+
   async findById(id: string): Promise<User | null> {
     return this.userRepo.findOne({ where: { id } });
   }
@@ -49,6 +54,9 @@ export class UsersService {
     const existing = await this.findByEmail(email);
     if (existing) throw new ConflictException('User with this email already exists');
 
+    const phoneExisting = await this.findByPhone(dto.phone);
+    if (phoneExisting) throw new ConflictException('This phone number is already registered');
+
     const tempPassword = dto.tempPassword || this.generateTempPassword();
     const passwordHash = await bcrypt.hash(tempPassword, 10);
 
@@ -58,7 +66,7 @@ export class UsersService {
       role,
       firstName: dto.firstName,
       lastName: dto.lastName,
-      phone: dto.phone ?? null,
+      phone: dto.phone,
       mustChangePassword: true,
     });
 
@@ -86,6 +94,12 @@ export class UsersService {
 
     (saved as any).tempPassword = tempPassword;
     return saved;
+  }
+
+  /** Remove user and parent–student rows where this user is the parent (registration rollback). */
+  async rollbackRegistration(userId: string): Promise<void> {
+    await this.parentStudents.deleteAllByParentId(userId);
+    await this.userRepo.delete(userId);
   }
 
   private generateTempPassword(): string {
@@ -129,7 +143,21 @@ export class UsersService {
 
   async patchUser(
     id: string,
-    body: Partial<Pick<User, 'firstName' | 'lastName' | 'phone' | 'grade' | 'section' | 'subject' | 'department' | 'childName' | 'relationship'>>,
+    body: Partial<
+      Pick<
+        User,
+        | 'firstName'
+        | 'lastName'
+        | 'phone'
+        | 'profileImageFileId'
+        | 'grade'
+        | 'section'
+        | 'subject'
+        | 'department'
+        | 'childName'
+        | 'relationship'
+      >
+    >,
   ) {
     const u = await this.findById(id);
     if (!u) throw new NotFoundException('User not found');
@@ -138,6 +166,7 @@ export class UsersService {
       'firstName',
       'lastName',
       'phone',
+      'profileImageFileId',
       'grade',
       'section',
       'subject',

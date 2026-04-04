@@ -36,6 +36,9 @@ export class User {
   @Column({ type: 'varchar', length: 40, nullable: true })
   phone: string | null;
 
+  @Column({ name: 'profile_image_file_id', type: 'uuid', nullable: true })
+  profileImageFileId: string | null;
+
   /** Student: grade (e.g. Grade 9); Teacher/Parent: null */
   @Column({ type: 'varchar', length: 40, nullable: true })
   grade: string | null;

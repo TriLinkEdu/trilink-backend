@@ -33,4 +33,8 @@ export class ParentStudentsService {
     if (!r) throw new NotFoundException('Link not found');
     await this.repo.remove(r);
   }
+
+  async deleteAllByParentId(parentId: string) {
+    await this.repo.delete({ parentId });
+  }
 }

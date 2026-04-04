@@ -2,13 +2,19 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { Notification } from './entities/notification.entity';
+import { EventsGateway } from '../realtime/events.gateway';
 
 @Injectable()
 export class NotificationsService {
-  constructor(@InjectRepository(Notification) private readonly repo: Repository<Notification>) {}
+  constructor(
+    @InjectRepository(Notification) private readonly repo: Repository<Notification>,
+    private readonly events: EventsGateway,
+  ) {}
 
   async createForUser(userId: string, body: Pick<Notification, 'type' | 'title' | 'body'> & { payloadJson?: string }) {
-    return this.repo.save(this.repo.create({ ...body, userId, payloadJson: body.payloadJson ?? null }));
+    const n = await this.repo.save(this.repo.create({ ...body, userId, payloadJson: body.payloadJson ?? null }));
+    this.events.emitToUser(userId, 'notification:new', n);
+    return n;
   }
 
   listForUser(userId: string, unreadOnly?: boolean) {

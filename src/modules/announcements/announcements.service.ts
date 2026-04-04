@@ -4,16 +4,20 @@ import { Repository } from 'typeorm';
 import { Announcement } from './entities/announcement.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { Enrollment } from '../enrollments/entities/enrollment.entity';
+import { EventsGateway } from '../realtime/events.gateway';
 
 @Injectable()
 export class AnnouncementsService {
   constructor(
     @InjectRepository(Announcement) private readonly repo: Repository<Announcement>,
     @InjectRepository(Enrollment) private readonly enrRepo: Repository<Enrollment>,
+    private readonly events: EventsGateway,
   ) {}
 
-  create(body: Partial<Announcement> & Pick<Announcement, 'academicYearId' | 'title' | 'body' | 'audience' | 'authorId'>) {
-    return this.repo.save(this.repo.create(body));
+  async create(body: Partial<Announcement> & Pick<Announcement, 'academicYearId' | 'title' | 'body' | 'audience' | 'authorId'>) {
+    const a = await this.repo.save(this.repo.create(body));
+    this.events.emitToAll('announcement:new', a);
+    return a;
   }
 
   list(yearId?: string) {

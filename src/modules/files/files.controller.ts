@@ -4,6 +4,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  StreamableFile,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -13,6 +14,7 @@ import { diskStorage } from 'multer';
 import type { Request } from 'express';
 import { extname } from 'path';
 import * as fs from 'fs';
+import { createReadStream } from 'fs';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -22,6 +24,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { FilesService } from './files.service';
 import { randomUUID } from 'crypto';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Files')
 @Controller('files')
@@ -62,5 +65,17 @@ export class FilesController {
   @ApiOperation({ summary: 'File metadata' })
   meta(@Param('id', ParseUUIDPipe) id: string) {
     return this.files.get(id);
+  }
+
+  @Get(':id/download')
+  @Public()
+  @ApiOperation({ summary: 'Download file content' })
+  async download(@Param('id', ParseUUIDPipe) id: string) {
+    const rec = await this.files.getOrThrow(id);
+    const stream = createReadStream(rec.path);
+    return new StreamableFile(stream, {
+      type: rec.mime,
+      disposition: `inline; filename="${encodeURIComponent(rec.filename)}"`,
+    });
   }
 }
