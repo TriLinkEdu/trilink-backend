@@ -17,13 +17,13 @@ class EnrollDto {
 @ApiTags('Enrollments')
 @Controller('enrollments')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
 @ApiBearerAuth('JWT')
 export class EnrollmentsController {
   constructor(private readonly svc: EnrollmentsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List enrollments' })
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({ summary: 'List enrollments (admin / teacher)' })
   list(
     @Query('studentId') studentId?: string,
     @Query('classOfferingId') classOfferingId?: string,
@@ -33,11 +33,13 @@ export class EnrollmentsController {
   }
 
   @Post()
+  @Roles(UserRole.ADMIN)
   create(@Body() dto: EnrollDto) {
     return this.svc.create(dto);
   }
 
   @Delete(':id')
+  @Roles(UserRole.ADMIN)
   async del(@Param('id', ParseUUIDPipe) id: string) {
     await this.svc.remove(id);
     return { ok: true };

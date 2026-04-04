@@ -142,6 +142,16 @@ export class ExamsController {
     return this.exams.publish(id, user);
   }
 
+  @Get(':id/students')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({
+    summary: 'Get student roster for this exam with attempt status and violation count',
+    description: 'Returns enrolled students (class-scoped) or students with attempts, with status: not_started | in_progress | submitted.',
+  })
+  studentRoster(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.exams.getExamStudentRoster(id, user);
+  }
+
   @Post(':id/attempts')
   @Roles(UserRole.STUDENT)
   startAttempt(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {

@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Subject } from '../../school-structure/entities/subject.entity';
 
 @Entity('questions')
 export class Question {
@@ -23,6 +24,10 @@ export class Question {
 
   @Column({ name: 'subject_id', type: 'uuid' })
   subjectId: string;
+
+  @ManyToOne(() => Subject)
+  @JoinColumn({ name: 'subject_id' })
+  subject?: Subject;
 
   @Column({ name: 'created_by_id', type: 'uuid' })
   createdById: string;

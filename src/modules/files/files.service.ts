@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FileRecord } from './entities/file-record.entity';
@@ -19,5 +19,11 @@ export class FilesService {
 
   async get(id: string) {
     return this.repo.findOne({ where: { id } });
+  }
+
+  async getOrThrow(id: string) {
+    const file = await this.get(id);
+    if (!file) throw new NotFoundException('File not found');
+    return file;
   }
 }

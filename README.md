@@ -1,108 +1,101 @@
-# TriLink Backend
+# 🚀 TriLink Backend: Advanced School Management API
 
-NestJS API for the TriLink school management platform. Provides authentication and admin-only registration for students, teachers, and parents.
+TriLink Backend is a robust, high-performance **NestJS** API designed for modern educational institutions. It powers the TriLink ecosystem with real-time proctoring, secure academic management, and unified communications.
 
-## Stack
+---
 
-- **NestJS** – API framework
-- **PostgreSQL** – TypeORM (default). Optional **SQLite** file DB via `DB_TYPE=sqlite` for local/mobile-style tooling only.
-- **JWT** – Access + refresh tokens
-- **Swagger** – API docs at `/api-docs`
-- **class-validator** – DTO validation
+## 🛠 Tech Stack
 
-## Setup
+- **Framework**: [NestJS](https://nestjs.com/) (TypeScript)
+- **Database**: PostgreSQL (via TypeORM)
+- **Real-Time**: Socket.io (WebSockets)
+- **Security**: JWT (Access + Refresh Tokens)
+- **Documentation**: Swagger UI
+- **Infrastructure**: Docker & Docker Compose
 
-1. **Environment**
-   - Create **`.env`** from **`.env.example`** (`.env` is gitignored). Defaults match **Docker Compose** Postgres (`trilink` / `trilink_secret` / database `trilink`).
+---
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+## ⚡ Quick Start
 
-3. **Database — pick one**
+### 1. Prerequisites
+- [Docker](https://www.docker.com/) & [Docker Compose](https://docs.docker.com/compose/)
+- [Node.js](https://nodejs.org/) v18+ (for local development)
 
-   **A. Docker (recommended)** — Postgres + API in containers:
-   ```bash
-   docker compose up --build
-   ```
-   - API: `http://localhost:4000/api` · Swagger: `/api-docs`
-   - Postgres is mapped to host port **5433** (not 5432) so it does not conflict with a local PostgreSQL install.
-   - First-time admin (uses the `seed` service on the same Docker network as `db`):
-     ```bash
-     docker compose --profile seed run --rm seed
-     ```
-   - **Postgres only** (Nest on the host): `docker compose up -d db`, then in `.env` use `DB_HOST=localhost` and **`DB_PORT=5433`**, then `npm run start:dev`.
-
-   **B. Local Postgres** — create user/database matching `.env`, then `npm run start:dev`.
-
-   **C. SQLite (optional)** — `DB_TYPE=sqlite` + `DB_SQLITE_PATH` for file-based / tooling only.
-
-4. **Run (without Docker for the API)**
-   ```bash
-   npm run start:dev
-   ```
-   - API: `http://localhost:4000/api`
-   - Swagger: `http://localhost:4000/api-docs`
-
-5. **Seed admin** (first time only)
-   - On host: `npm run seed`
-   - After `docker compose up`: `docker compose --profile seed run --rm seed`
-   - Uses `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` from `.env` (default: `admin@trilink.edu` / `Admin@123`).
-
-## Roadmap (30 steps)
-
-Full feature plan: **one commit per step**, test each step via **Swagger** (`/api-docs`), with Swagger documentation standards per step.
-
-→ See **[docs/BACKEND_ROADMAP_30_STEPS.md](./docs/BACKEND_ROADMAP_30_STEPS.md)**
-
-## Auth flow
-
-- **Login:** `POST /api/auth/login` with `{ "email", "password", "role" }` → returns `accessToken`, `refreshToken`, `user`.
-- **Refresh:** `POST /api/auth/refresh` with `{ "refreshToken" }` → new tokens.
-- **Register (admin only):** `POST /api/auth/register` with `Authorization: Bearer <accessToken>` and body per Swagger. Admin is the only role that can register students, teachers, and parents. For parents, prefer **`linkedStudentId` + `relationship`** to link the correct student (names can duplicate); optional `childName` is display-only.
-
-## API surface (high level)
-
-All routes are under global prefix `/api` (default). Swagger groups:
-
-| Tag | Routes (examples) |
-|-----|-------------------|
-| Auth | `POST /auth/login`, `/auth/refresh`, `/auth/register` |
-| Users | `GET/PATCH /users`, `/users/:id` (admin) |
-| Academic calendar | `/academic-years`, terms, `activate`, `close`, `rollover` |
-| School structure | `/grades`, `/sections`, `/subjects` |
-| Classes | `/class-offerings?academicYearId=` |
-| Enrollments | `/enrollments` |
-| Parents | `/parent-students` |
-| Calendar | `/calendar-events` |
-| Attendance | `/attendance-sessions`, marks, `/reports/attendance/...` |
-| Exams | `/questions`, `/exams`, `/attempts/...` |
-| Announcements | `/announcements`, `/announcements/for-me` |
-| Feedback | `/feedback` |
-| Notifications | `/notifications` |
-| Chat | `/conversations`, `/chat/ws-info` + Socket.IO gateway |
-| Dashboard | `/dashboard/admin|teacher|student|parent`, `/dashboard/children/:id/summary` |
-| Settings | `/me/settings`, `/school/settings` |
-| Files | `POST /files/upload`, `GET /files/:id` |
-| Admin | `/audit-logs` |
-
-## Folder structure
-
+### 2. Clone & Environment
+```bash
+git clone https://github.com/TriLinkEdu/trilink-backend.git
+cd trilink-backend
+cp .env.example .env
 ```
+*Note: Default values in `.env.example` are pre-configured for the Docker setup.*
+
+### 3. Launch with Docker (Recommended)
+```bash
+docker compose up --build
+```
+The API will be available at `http://localhost:4000/api`.
+
+### 4. Seed Initial Data
+To create the default admin account (`admin@trilink.edu` / `Admin@123`):
+```bash
+docker compose --profile seed run --rm seed
+```
+
+---
+
+## 🛡 Key Features
+
+### 🏢 Academic Management
+- **Hierarchical Structure**: Manage Academic Years, Grades, Sections, and Subjects.
+- **Roster System**: Advanced student enrollment and class offering synchronization.
+- **Teacher/Parent Links**: Multi-role support for real-time student monitoring.
+
+### 🎥 Real-Time Exam Proctoring
+- **Live Monitor**: Teachers can track student status and violation counts in real-time.
+- **Remote Interventions**: Instant "Warning" and "Force Submit" commands sent via WebSockets.
+- **Integrity Tracking**: Automated detection of tab switching and fullscreen exit.
+
+### 💬 Unified Communications
+- **Real-Time Gateway**: Centralized WebSocket layer for Chat, Announcements, and System Alerts.
+- **Notification Engine**: Role-based broadcast system with persistent history.
+
+---
+
+## 📚 API Documentation
+
+Once the server is running, access the interactive Swagger documentation at:
+🔗 **[http://localhost:4000/api-docs](http://localhost:4000/api-docs)**
+
+---
+
+## 🏗 Development Workflow
+
+### Local Setup (No Docker)
+1. Install dependencies: `npm install`
+2. Start a local Postgres (mapped to port 5433) or use the Docker DB: `docker compose up -d db`
+3. Run in dev mode: `npm run start:dev`
+
+### Persistent Storage
+The project uses Docker volumes to ensure that profile pictures and media assets persist across container restarts:
+- Volume: `trilink_uploads` → `/app/uploads`
+
+---
+
+## 🤝 Folder Structure
+
+```text
 src/
-├── config/
-├── database/         # TypeORM root + entity registry
-├── common/
-├── modules/
-│   ├── academic-years, announcements, attendance, audit, auth, calendar, chat,
-│   ├── class-offerings, dashboards, enrollments, exams, feedback, files,
-│   ├── notifications, parent-students, school-structure, settings, users
-├── scripts/
-└── main.ts
+├── common/           # Decorators, Guards, Utils
+├── config/           # App & Secret configurations
+├── modules/          # Feature-based architecture
+│   ├── auth/         # Security & Roles
+│   ├── realtime/     # WebSocket Gateway
+│   ├── exams/        # Proctoring & Question Bank
+│   └── ...           # Dashboards, Attendance, Users, etc.
+└── main.ts           # Global entry point
 ```
 
-## Web / Mobile
+---
 
-- **Web:** Point Next.js API proxy or `fetch` to `http://localhost:4000/api` (e.g. `POST /api/auth/login`, `POST /api/auth/register` with Bearer token).
-- **Mobile:** Set `ApiConstants.baseUrl` to `http://<host>:4000/api` and use `/auth/login`, `/auth/register`, `/auth/refresh`. On-device storage (e.g. SQLite in the app) is separate from this server, which targets **PostgreSQL**.
+## ⚖ License
+Proprietary. Developed for the TriLink Educational Ecosystem.

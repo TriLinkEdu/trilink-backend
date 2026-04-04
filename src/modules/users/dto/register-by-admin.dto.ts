@@ -1,5 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, IsUUID, MinLength, ValidateIf } from 'class-validator';
+import { Transform } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
+import { normalizePhoneInput } from '../../../common/utils/phone.util';
 
 export enum RegisterRole {
   STUDENT = 'student',
@@ -22,10 +35,17 @@ export class RegisterByAdminDto {
   @MinLength(1)
   lastName: string;
 
-  @ApiPropertyOptional({ example: '+251911234567', description: 'Phone number' })
-  @IsOptional()
+  @ApiProperty({
+    example: '+251911234567',
+    description: 'Phone number (required). 9–15 digits; optional leading +. Spaces/dashes allowed and stripped.',
+  })
+  @Transform(({ value }) => normalizePhoneInput(value))
+  @IsNotEmpty({ message: 'Phone number is required' })
   @IsString()
-  phone?: string;
+  @Matches(/^\+?[1-9]\d{8,14}$/, {
+    message: 'Phone must be 9–15 digits with optional country code (+)',
+  })
+  phone: string;
 
   @ApiProperty({
     enum: RegisterRole,

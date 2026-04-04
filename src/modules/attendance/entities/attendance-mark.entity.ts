@@ -15,6 +15,9 @@ export class AttendanceMark {
   @Column({ type: 'varchar', length: 20 })
   status: string;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  note: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }

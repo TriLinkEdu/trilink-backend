@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Post, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -21,13 +21,19 @@ import { ErrorResponseDto } from '../../common/dto/error-response.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { MailService } from '../mail/mail.service';
+import { AuditService } from '../audit/audit.service';
 
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private readonly authService: AuthService,
     private readonly usersService: UsersService,
+    private readonly mailService: MailService,
+    private readonly auditService: AuditService,
   ) {}
 
   @Post('login')
@@ -127,8 +133,14 @@ export class AuthController {
   @ApiResponse({ status: 200, schema: { example: { ok: true } } })
   @ApiResponse({ status: 401, description: 'Wrong current password', type: ErrorResponseDto })
   @ApiResponse({ status: 400, description: 'Validation or same-as-current password', type: ErrorResponseDto })
-  changePassword(@CurrentUser() user: User, @Body() dto: ChangePasswordDto) {
-    return this.usersService.changePassword(user.id, dto.currentPassword, dto.newPassword);
+  async changePassword(@CurrentUser() user: User, @Body() dto: ChangePasswordDto) {
+    const res = await this.usersService.changePassword(user.id, dto.currentPassword, dto.newPassword);
+    try {
+      await this.auditService.log(user.id, 'user.password_change', 'user', user.id);
+    } catch (e) {
+      this.logger.warn('Audit log skipped (password change)', e instanceof Error ? e.message : e);
+    }
+    return res;
   }
 
   @Post('register')
@@ -212,13 +224,45 @@ export class AuthController {
   })
   @ApiResponse({
     status: 409,
-    description: 'Email already registered',
+    description: 'Email or phone already registered',
     type: ErrorResponseDto,
-    schema: { example: { statusCode: 409, error: 'Conflict', message: 'User with this email already exists' } },
+    schema: {
+      example: {
+        statusCode: 409,
+        error: 'Conflict',
+        message: 'User with this email already exists',
+      },
+    },
+  })
+  @ApiResponse({
+    status: 503,
+    description: 'SMTP configured but welcome email failed; registration was rolled back',
+    type: ErrorResponseDto,
   })
   @ApiResponse({ status: 400, description: 'Validation error', type: ErrorResponseDto })
-  async registerByAdmin(@Body() dto: RegisterByAdminDto) {
+  async registerByAdmin(@CurrentUser() admin: User, @Body() dto: RegisterByAdminDto) {
     const user = await this.usersService.registerByAdmin(dto);
+    const tempPassword = (user as any).tempPassword as string | undefined;
+
+    let registrationEmailSent = false;
+    if (this.mailService.isConfigured()) {
+      try {
+        await this.mailService.sendRegistrationCredentials(
+          user.email,
+          user.firstName,
+          tempPassword ?? '',
+          user.role,
+        );
+        registrationEmailSent = true;
+      } catch (err) {
+        this.logger.error('Registration welcome email failed', err instanceof Error ? err.stack : err);
+        await this.usersService.rollbackRegistration(user.id);
+        throw new ServiceUnavailableException(
+          'Welcome email could not be sent. Registration was not completed. Check SMTP settings.',
+        );
+      }
+    }
+
     const response: Record<string, unknown> = {
       id: user.id,
       email: user.email,
@@ -226,9 +270,25 @@ export class AuthController {
       firstName: user.firstName,
       lastName: user.lastName,
       mustChangePassword: user.mustChangePassword,
+      registrationEmailSent,
     };
-    if ((user as any).tempPassword) {
-      response.tempPassword = (user as any).tempPassword;
+    if (tempPassword !== undefined) {
+      response.tempPassword = tempPassword;
+    }
+    try {
+      await this.auditService.log(
+        admin.id,
+        'user.register',
+        'user',
+        user.id,
+        JSON.stringify({
+          email: user.email,
+          role: user.role,
+          name: `${user.firstName} ${user.lastName}`.trim(),
+        }),
+      );
+    } catch (e) {
+      this.logger.warn('Audit log skipped (register)', e instanceof Error ? e.message : e);
     }
     return response;
   }

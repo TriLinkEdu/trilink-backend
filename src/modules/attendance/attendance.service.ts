@@ -29,7 +29,7 @@ export class AttendanceService {
     return this.sessRepo.find({ where: { classOfferingId }, order: { date: 'DESC' } });
   }
 
-  async putMarks(sessionId: string, marks: { studentId: string; status: string }[]) {
+  async putMarks(sessionId: string, marks: { studentId: string; status: string; note?: string }[]) {
     const session = await this.sessRepo.findOne({ where: { id: sessionId } });
     if (!session) throw new NotFoundException('Session not found');
     const enrolled = await this.enrRepo.find({ where: { classOfferingId: session.classOfferingId, status: 'active' } });
@@ -39,9 +39,10 @@ export class AttendanceService {
       const existing = await this.markRepo.findOne({ where: { sessionId, studentId: m.studentId } });
       if (existing) {
         existing.status = m.status;
+        existing.note = m.note ?? null;
         await this.markRepo.save(existing);
       } else {
-        await this.markRepo.save(this.markRepo.create({ sessionId, studentId: m.studentId, status: m.status }));
+        await this.markRepo.save(this.markRepo.create({ sessionId, studentId: m.studentId, status: m.status, note: m.note ?? null }));
       }
     }
 

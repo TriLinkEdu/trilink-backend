@@ -41,5 +41,21 @@ export default () => {
   digest: {
     enabled: process.env.WEEKLY_DIGEST_ENABLED !== 'false',
   },
+  mail: {
+    host: (process.env.SMTP_HOST || '').trim(),
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
+    secure: process.env.SMTP_SECURE === 'true',
+    user: (process.env.SMTP_USER || '').trim(),
+    pass: process.env.SMTP_PASS || '',
+    from: process.env.SMTP_FROM || 'TriLink <noreply@trilink.local>',
+    /**
+     * Registration emails pick the URL for the new user’s role. Role-specific vars win; each falls back to APP_LOGIN_URL.
+     */
+    loginUrls: {
+      student: (process.env.APP_LOGIN_URL_STUDENT || process.env.APP_LOGIN_URL || '').trim(),
+      teacher: (process.env.APP_LOGIN_URL_TEACHER || process.env.APP_LOGIN_URL || '').trim(),
+      parent: (process.env.APP_LOGIN_URL_PARENT || process.env.APP_LOGIN_URL || '').trim(),
+    },
+  },
 };
 };

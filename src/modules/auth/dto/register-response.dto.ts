@@ -24,4 +24,10 @@ export class RegisterResponseDto {
     description: 'Temporary password (only when server generated it; share securely with the user)',
   })
   tempPassword?: string;
+
+  @ApiProperty({
+    example: true,
+    description: 'True when SMTP is configured and the welcome email with temporary password was sent successfully',
+  })
+  registrationEmailSent: boolean;
 }
