@@ -57,8 +57,8 @@ export class ClassOfferingsController {
   }
 
   @Get()
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'List offerings by academic year (admin)' })
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({ summary: 'List offerings by academic year (admin/teacher)' })
   list(@Query('academicYearId') academicYearId: string) {
     if (!academicYearId) throw new BadRequestException('academicYearId query required');
     return this.svc.list(academicYearId);

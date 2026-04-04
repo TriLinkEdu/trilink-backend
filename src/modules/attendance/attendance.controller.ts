@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags, ApiPropertyOptional } from '@nestjs/swagger';
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsString, IsUUID, ValidateNested } from 'class-validator';
+import { IsArray, IsString, IsUUID, ValidateNested, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -14,6 +14,7 @@ import { AttendanceService } from './attendance.service';
 class MarkRow {
   @ApiProperty() @IsUUID() studentId: string;
   @ApiProperty({ example: 'present' }) @IsString() status: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
 }
 class BulkMarksDto {
   @ApiProperty({ type: [MarkRow] })
