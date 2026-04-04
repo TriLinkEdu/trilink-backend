@@ -1,9 +1,10 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../users/users.service';
 import { User, UserRole } from '../users/entities/user.entity';
-import { LoginDto, LoginRole } from './dto/login.dto';
+import { LoginDto } from './dto/login.dto';
+import { AuditService } from '../audit/audit.service';
 
 export interface JwtPayload {
   sub: string;
@@ -23,15 +24,19 @@ export interface TokenResponse {
     firstName: string;
     lastName: string;
     mustChangePassword: boolean;
+    profileImageFileId: string | null;
   };
 }
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly audit: AuditService,
   ) {}
 
   async login(dto: LoginDto): Promise<TokenResponse> {
@@ -44,7 +49,23 @@ export class AuthService {
     const valid = await this.usersService.validatePassword(user, dto.password);
     if (!valid) throw new UnauthorizedException('Invalid email or password');
 
-    return this.buildTokenResponse(user);
+    const res = this.buildTokenResponse(user);
+    void this.safeAudit(
+      user.id,
+      'user.login',
+      'session',
+      user.id,
+      JSON.stringify({ accountRole: user.role, portalRole: dto.role }),
+    );
+    return res;
+  }
+
+  private async safeAudit(actorId: string, action: string, entityType: string, entityId: string, diffJson?: string) {
+    try {
+      await this.audit.log(actorId, action, entityType, entityId, diffJson);
+    } catch (e) {
+      this.logger.warn(`Audit log skipped (${action})`, e instanceof Error ? e.message : e);
+    }
   }
 
   async refresh(refreshToken: string): Promise<TokenResponse> {
@@ -88,6 +109,7 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         mustChangePassword: user.mustChangePassword,
+        profileImageFileId: user.profileImageFileId ?? null,
       },
     };
   }
