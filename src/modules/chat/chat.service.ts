@@ -6,6 +6,7 @@ import { ConversationMember } from './entities/conversation-member.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 import { User, UserRole } from '../users/entities/user.entity';
+import { EventsGateway } from '../realtime/events.gateway';
 
 @Injectable()
 export class ChatService {
@@ -14,6 +15,7 @@ export class ChatService {
     @InjectRepository(ConversationMember) private readonly memRepo: Repository<ConversationMember>,
     @InjectRepository(ChatMessage) private readonly msgRepo: Repository<ChatMessage>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
+    private readonly events: EventsGateway,
   ) {}
 
   async assertMember(conversationId: string, userId: string) {
@@ -79,6 +81,18 @@ export class ChatService {
     const msg = await this.msgRepo.save(this.msgRepo.create({ conversationId, senderId, text }));
     const conv = await this.convRepo.findOne({ where: { id: conversationId } });
     if (conv) await this.convRepo.save(conv);
+
+    // Emit real-time event
+    const members = await this.memRepo.find({ where: { conversationId } });
+    for (const mem of members) {
+      if (mem.userId !== senderId) {
+        this.events.emitToUser(mem.userId, 'message:new', {
+          conversationId,
+          message: msg,
+        });
+      }
+    }
+
     return msg;
   }
 
