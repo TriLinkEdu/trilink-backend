@@ -6,6 +6,10 @@ import { ClassOffering } from '../class-offerings/entities/class-offering.entity
 import { Enrollment } from '../enrollments/entities/enrollment.entity';
 import { Notification } from '../notifications/entities/notification.entity';
 import { ExamAttempt } from '../exams/entities/exam-attempt.entity';
+import { Exam } from '../exams/entities/exam.entity';
+import { AttendanceSession } from '../attendance/entities/attendance-session.entity';
+import { AttendanceMark } from '../attendance/entities/attendance-mark.entity';
+import { Announcement } from '../announcements/entities/announcement.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 
 @Injectable()
@@ -16,6 +20,10 @@ export class DashboardsService {
     @InjectRepository(Enrollment) private readonly enr: Repository<Enrollment>,
     @InjectRepository(Notification) private readonly notif: Repository<Notification>,
     @InjectRepository(ExamAttempt) private readonly attempts: Repository<ExamAttempt>,
+    @InjectRepository(Exam) private readonly exams: Repository<Exam>,
+    @InjectRepository(AttendanceSession) private readonly attSessions: Repository<AttendanceSession>,
+    @InjectRepository(AttendanceMark) private readonly attMarks: Repository<AttendanceMark>,
+    @InjectRepository(Announcement) private readonly announcements: Repository<Announcement>,
     @InjectRepository(ParentStudent) private readonly ps: Repository<ParentStudent>,
   ) {}
 
@@ -33,6 +41,19 @@ export class DashboardsService {
 
   async teacher(userId: string) {
     const myClasses = await this.classes.count({ where: { teacherId: userId } });
+
+    const studentsRaw = await this.enr
+      .createQueryBuilder('e')
+      .innerJoin('class_offerings', 'co', 'co.id = e.class_offering_id')
+      .where('co.teacher_id = :uid', { uid: userId })
+      .andWhere('e.status = :status', { status: 'active' })
+      .select('COUNT(DISTINCT e.student_id)', 'count')
+      .getRawOne();
+    const totalStudents = parseInt(studentsRaw?.count || '0', 10);
+
+    const publishedExams = await this.exams.count({ where: { createdById: userId, published: true } });
+    const recentAnnouncements = await this.announcements.count({ where: { authorId: userId } });
+
     const pendingGrade = await this.attempts
       .createQueryBuilder('a')
       .innerJoin('exams', 'e', 'e.id = a.exam_id')
@@ -40,8 +61,42 @@ export class DashboardsService {
       .andWhere('a.score IS NULL')
       .andWhere('e.created_by_id = :uid', { uid: userId })
       .getCount();
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const dateStr = thirtyDaysAgo.toISOString().split('T')[0];
+
+    const attStats = await this.attMarks
+      .createQueryBuilder('m')
+      .innerJoin('attendance_sessions', 's', 's.id = m.session_id')
+      .innerJoin('class_offerings', 'co', 'co.id = s.class_offering_id')
+      .where('co.teacher_id = :uid', { uid: userId })
+      .andWhere('s.date >= :date', { date: dateStr })
+      .select('m.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('m.status')
+      .getRawMany();
+
+    let presentCount = 0;
+    let totalMarks = 0;
+    for (const stat of attStats) {
+      const c = parseInt(stat.count, 10);
+      if (stat.status === 'present') presentCount += c;
+      totalMarks += c;
+    }
+    const attendanceRate = totalMarks > 0 ? presentCount / totalMarks : null;
+
     const unread = await this.notif.count({ where: { userId, readAt: IsNull() } });
-    return { myClasses, pendingGradingApprox: pendingGrade, unreadNotifications: unread };
+
+    return {
+      myClasses,
+      totalStudents,
+      pendingGradingApprox: pendingGrade,
+      unreadNotifications: unread,
+      attendanceRate,
+      publishedExams,
+      recentAnnouncements,
+    };
   }
 
   async student(userId: string) {
