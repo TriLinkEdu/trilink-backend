@@ -32,6 +32,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { HealthModule } from './modules/health/health.module';
 import { DigestModule } from './modules/digest/digest.module';
+import { RealtimeModule } from './modules/realtime/realtime.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { DigestModule } from './modules/digest/digest.module';
     AnalyticsModule,
     IntegrationsModule,
     DigestModule,
+    RealtimeModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

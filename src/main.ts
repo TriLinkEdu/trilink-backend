@@ -23,7 +23,25 @@ async function bootstrap() {
   );
   const corsList = config.get<string[] | null>('corsOrigin');
   if (corsList?.length) {
-    app.enableCors({ origin: corsList, credentials: true });
+    const normalizedAllowed = new Set(
+      corsList
+        .map((o) => o.trim())
+        .filter(Boolean)
+        .map((o) => o.replace(/\/$/, '')),
+    );
+    // Keep local dev resilient even when CORS_ORIGIN is set narrowly.
+    normalizedAllowed.add('http://localhost:3000');
+    normalizedAllowed.add('http://127.0.0.1:3000');
+    app.enableCors({
+      credentials: true,
+      origin: (origin, cb) => {
+        // Allow same-origin, Swagger UI, curl/postman (no Origin header)
+        if (!origin) return cb(null, true);
+        const normalized = origin.replace(/\/$/, '');
+        if (normalizedAllowed.has(normalized)) return cb(null, true);
+        return cb(new Error(`CORS blocked for origin: ${origin}`), false);
+      },
+    });
   } else {
     app.enableCors({ origin: true });
   }
