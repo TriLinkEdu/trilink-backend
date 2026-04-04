@@ -31,6 +31,10 @@ export class ExamAttempt {
   @Column({ name: 'breakdown_json', type: 'text', nullable: true })
   breakdownJson: string | null;
 
+  /** JSON array of { reason: string, timestamp: string } — tab-switch / focus-loss events */
+  @Column({ name: 'violations_json', type: 'text', nullable: true })
+  violationsJson: string | null;
+
   @Column({ name: 'needs_manual_grading', type: 'boolean', default: false })
   needsManualGrading: boolean;
 
