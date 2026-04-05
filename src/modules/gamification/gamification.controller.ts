@@ -96,4 +96,18 @@ export class GamificationController {
   studentPoints(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
     return this.gam.totalBadgePointsForViewer(studentId, user);
   }
+
+  @Get('me/streak')
+  @Roles(UserRole.STUDENT, UserRole.PARENT, UserRole.TEACHER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'My login streak' })
+  myStreak(@CurrentUser() user: User) {
+    return this.gam.getLoginStreak(user.id);
+  }
+
+  @Get('leaderboard/streaks')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({ summary: 'Leaderboard by current login streak' })
+  streakLeaderboard(@Query('limit') limit?: string) {
+    return this.gam.leaderboardStreaks(limit ? parseInt(limit, 10) : 20);
+  }
 }

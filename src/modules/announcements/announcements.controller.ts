@@ -1,7 +1,18 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsDateString, IsOptional, IsString, IsUUID } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -16,6 +27,18 @@ class AnnDto {
   @ApiProperty() @IsString() body: string;
   @ApiProperty({ example: 'all' }) @IsString() audience: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() classOfferingId?: string;
+  @ApiPropertyOptional({ description: 'ISO 8601 — hidden from students/parents until this time' })
+  @IsOptional()
+  @IsDateString()
+  publishAt?: string;
+}
+
+class AnnPatchDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() title?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() body?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() audience?: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() classOfferingId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() publishAt?: string;
 }
 
 @ApiTags('Announcements')
@@ -41,7 +64,30 @@ export class AnnouncementsController {
   @Post()
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   create(@Body() dto: AnnDto, @CurrentUser() user: User) {
-    return this.svc.create({ ...dto, authorId: user.id });
+    const { publishAt, ...rest } = dto;
+    return this.svc.create({
+      ...rest,
+      authorId: user.id,
+      publishAt: publishAt ? new Date(publishAt) : null,
+    });
+  }
+
+  @Patch(':id')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({ summary: 'Update announcement (author or admin)' })
+  patch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AnnPatchDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.update(id, {
+      title: dto.title,
+      body: dto.body,
+      audience: dto.audience,
+      classOfferingId: dto.classOfferingId,
+      publishAt:
+        dto.publishAt === undefined ? undefined : dto.publishAt ? new Date(dto.publishAt) : null,
+    }, user);
   }
 
   @Delete(':id')

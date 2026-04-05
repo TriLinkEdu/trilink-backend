@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -13,6 +13,12 @@ import { FeedbackService } from './feedback.service';
 class FCreate {
   @ApiProperty() @IsString() @MinLength(2) category: string;
   @ApiProperty() @IsString() @MinLength(1) message: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() subjectId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() teacherId?: string;
+  @ApiPropertyOptional({ description: 'Default true (anonymous). Set false to attach your identity.' })
+  @IsOptional()
+  @IsBoolean()
+  isAnonymous?: boolean;
 }
 class FPatch {
   @ApiPropertyOptional() @IsOptional() @IsString() status?: string;
@@ -28,15 +34,30 @@ export class FeedbackController {
 
   @Post()
   @Roles(UserRole.STUDENT, UserRole.PARENT, UserRole.TEACHER)
-  @ApiOperation({ summary: 'Submit feedback' })
+  @ApiOperation({ summary: 'Submit feedback (anonymous by default)' })
   create(@Body() dto: FCreate, @CurrentUser() user: User) {
-    return this.svc.create({ authorId: user.id, category: dto.category, message: dto.message });
+    return this.svc.create({
+      authorId: user.id,
+      category: dto.category,
+      message: dto.message,
+      subjectId: dto.subjectId,
+      teacherId: dto.teacherId,
+      isAnonymous: dto.isAnonymous,
+    });
+  }
+
+  @Get('for-teacher')
+  @Roles(UserRole.TEACHER)
+  @ApiOperation({ summary: 'Anonymous feedback directed at this teacher' })
+  forTeacher(@CurrentUser() user: User) {
+    return this.svc.listForTeacher(user.id);
   }
 
   @Get()
   @Roles(UserRole.ADMIN)
-  list() {
-    return this.svc.list();
+  @ApiOperation({ summary: 'List all feedback (author hidden when anonymous)' })
+  list(@Query('subjectId') subjectId?: string, @Query('teacherId') teacherId?: string) {
+    return this.svc.list({ subjectId, teacherId });
   }
 
   @Patch(':id')

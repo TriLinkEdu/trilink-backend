@@ -65,6 +65,13 @@ export class ChatController {
     return this.chat.listConversations(user.id, user.role);
   }
 
+  @Get('conversations/all')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Admin: list all conversations (moderation)' })
+  listAllForAdmin() {
+    return this.chat.listAllConversations();
+  }
+
   @Get('conversations/:id')
   one(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
     return this.chat.getConversation(id, user);

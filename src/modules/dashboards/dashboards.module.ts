@@ -10,6 +10,7 @@ import { AttendanceSession } from '../attendance/entities/attendance-session.ent
 import { AttendanceMark } from '../attendance/entities/attendance-mark.entity';
 import { Announcement } from '../announcements/entities/announcement.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
+import { Feedback } from '../feedback/entities/feedback.entity';
 import { DashboardsService } from './dashboards.service';
 import { DashboardsController } from './dashboards.controller';
 
@@ -26,6 +27,7 @@ import { DashboardsController } from './dashboards.controller';
       AttendanceMark,
       Announcement,
       ParentStudent,
+      Feedback,
     ]),
   ],
   controllers: [DashboardsController],

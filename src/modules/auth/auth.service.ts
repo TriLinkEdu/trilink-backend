@@ -5,6 +5,7 @@ import { UsersService } from '../users/users.service';
 import { User, UserRole } from '../users/entities/user.entity';
 import { LoginDto } from './dto/login.dto';
 import { AuditService } from '../audit/audit.service';
+import { GamificationService } from '../gamification/gamification.service';
 
 export interface JwtPayload {
   sub: string;
@@ -37,6 +38,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly audit: AuditService,
+    private readonly gamification: GamificationService,
   ) {}
 
   async login(dto: LoginDto): Promise<TokenResponse> {
@@ -57,6 +59,7 @@ export class AuthService {
       user.id,
       JSON.stringify({ accountRole: user.role, portalRole: dto.role }),
     );
+    void this.gamification.recordLogin(user.id).catch(() => undefined);
     return res;
   }
 

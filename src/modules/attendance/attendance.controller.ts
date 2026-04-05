@@ -38,7 +38,7 @@ export class AttendanceController {
     @Body() body: { classOfferingId: string; date: string },
     @CurrentUser() user: User,
   ) {
-    return this.svc.createSession({ ...body, takenById: user.id });
+    return this.svc.createSession({ ...body, takenById: user.id }, user);
   }
 
   @Get('attendance-sessions')
@@ -49,8 +49,12 @@ export class AttendanceController {
 
   @Put('attendance-sessions/:id/marks')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
-  putMarks(@Param('id', ParseUUIDPipe) id: string, @Body() dto: BulkMarksDto) {
-    return this.svc.putMarks(id, dto.marks);
+  putMarks(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: BulkMarksDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.putMarks(id, dto.marks, user);
   }
 
   @Get('attendance-sessions/:id/marks')
@@ -61,9 +65,9 @@ export class AttendanceController {
 
   @Get('reports/attendance/student/:studentId')
   @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
-  @ApiOperation({ summary: 'Student attendance report (self/parent restricted in production)' })
-  repStudent(@Param('studentId', ParseUUIDPipe) studentId: string) {
-    return this.svc.reportStudent(studentId);
+  @ApiOperation({ summary: 'Student attendance report (self, linked parent, or staff)' })
+  repStudent(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
+    return this.svc.reportStudent(studentId, user);
   }
 
   @Get('reports/attendance/class/:classOfferingId')

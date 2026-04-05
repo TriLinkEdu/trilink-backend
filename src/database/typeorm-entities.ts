@@ -26,6 +26,7 @@ import { FileRecord } from '../modules/files/entities/file-record.entity';
 import { AuditLog } from '../modules/audit/entities/audit-log.entity';
 import { Badge } from '../modules/gamification/entities/badge.entity';
 import { UserBadge } from '../modules/gamification/entities/user-badge.entity';
+import { LoginStreak } from '../modules/gamification/entities/login-streak.entity';
 import { StudentGoal } from '../modules/goals/entities/student-goal.entity';
 import { StudentProfile } from '../modules/student-profiles/entities/student-profile.entity';
 
@@ -58,6 +59,7 @@ export const TYPEORM_ENTITIES = [
   AuditLog,
   Badge,
   UserBadge,
+  LoginStreak,
   StudentGoal,
   StudentProfile,
 ];

@@ -1,12 +1,25 @@
-import { Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
+import { IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { User } from '../users/entities/user.entity';
-import { NotificationsService } from './notifications.service';
+import { User, UserRole } from '../users/entities/user.entity';
+import { NotificationsService, BroadcastAudience } from './notifications.service';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { UserRole } from '../users/entities/user.entity';
+
+class BroadcastDto {
+  @ApiProperty() @IsString() @MinLength(1) title: string;
+  @ApiProperty() @IsString() @MinLength(1) body: string;
+  @ApiProperty({ enum: ['class', 'all_students'] })
+  @IsEnum(['class', 'all_students'] as const)
+  audience: BroadcastAudience;
+
+  @ApiProperty({ required: false, description: 'Required when audience is class' })
+  @IsOptional()
+  @IsUUID()
+  classOfferingId?: string;
+}
 
 @ApiTags('Notifications')
 @Controller('notifications')
@@ -20,6 +33,15 @@ export class NotificationsController {
   @ApiOperation({ summary: 'My notifications' })
   list(@CurrentUser() user: User, @Query('unreadOnly') unreadOnly?: string) {
     return this.svc.listForUser(user.id, unreadOnly === 'true');
+  }
+
+  @Post('broadcast')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({
+    summary: 'Broadcast notification to a class (teacher owner or admin) or all students (admin only)',
+  })
+  broadcast(@CurrentUser() user: User, @Body() dto: BroadcastDto) {
+    return this.svc.broadcastFromStaff(user, dto);
   }
 
   @Patch(':id/read')

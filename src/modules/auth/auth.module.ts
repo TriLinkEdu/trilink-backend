@@ -7,6 +7,7 @@ import { AuthService } from './auth.service';
 import { UsersModule } from '../users/users.module';
 import { MailModule } from '../mail/mail.module';
 import { AuditModule } from '../audit/audit.module';
+import { GamificationModule } from '../gamification/gamification.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
 @Module({
@@ -14,6 +15,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     UsersModule,
     MailModule,
     AuditModule,
+    GamificationModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
