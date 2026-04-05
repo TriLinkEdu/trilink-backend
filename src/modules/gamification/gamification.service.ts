@@ -200,7 +200,7 @@ export class GamificationService implements OnModuleInit {
       .andWhere('a.released_at IS NOT NULL')
       .andWhere('a.score IS NOT NULL')
       .groupBy('a.student_id')
-      .orderBy('avgScore', 'DESC')
+      .orderBy('AVG(a.score)', 'DESC')
       .take(Math.min(Math.max(limit, 1), 100));
 
     const raw = await qb.getRawMany();

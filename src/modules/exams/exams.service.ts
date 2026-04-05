@@ -405,11 +405,14 @@ export class ExamsService {
         breakdown = null;
       }
     }
-    const examQuestions = await this.eqRepo.find({
+    const eqRows = await this.eqRepo.find({
       where: { examId: a.examId },
-      relations: ['question'],
       order: { orderIndex: 'ASC' },
     });
+    const qIds = [...new Set(eqRows.map((eq) => eq.questionId))];
+    const questions = qIds.length ? await this.qRepo.find({ where: { id: In(qIds) } }) : [];
+    const qMap = new Map(questions.map((q) => [q.id, q]));
+    const examQuestions = eqRows.map((eq) => ({ ...eq, question: qMap.get(eq.questionId) ?? null }));
     const student = await this.userRepo.findOne({ where: { id: a.studentId } });
     return {
       attempt: {
