@@ -125,7 +125,8 @@ export class AiService {
 
     const strengths: string[] = [];
     const improvements: string[] = [];
-    if (attendanceRate != null && attendanceRate >= 0.85) strengths.push('Strong attendance consistency.');
+    if (attendanceRate != null && attendanceRate >= 0.9) strengths.push('Strong attendance consistency.');
+    else if (attendanceRate != null && attendanceRate >= 0.75) strengths.push('Decent attendance — keep it up!');
     else if (attendanceRate != null) improvements.push('Focus on attending every scheduled class.');
     if (avgScore != null && avgScore >= 80) strengths.push('Solid performance on released assessments.');
     else if (avgScore != null) improvements.push('Review feedback on past exams and ask teachers for clarification.');

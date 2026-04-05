@@ -27,7 +27,7 @@ export class Feedback {
   @Column({ name: 'teacher_id', type: 'uuid', nullable: true })
   teacherId: string | null;
 
-  @Column({ name: 'is_anonymous', type: 'boolean', default: true })
+  @Column({ name: 'is_anonymous', type: 'boolean', default: false })
   isAnonymous: boolean;
 
   @CreateDateColumn({ name: 'created_at' })

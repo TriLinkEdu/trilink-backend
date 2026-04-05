@@ -106,7 +106,7 @@ export class ChatService {
     });
   }
 
-  async listAllConversations() {
-    return this.convRepo.find({ order: { updatedAt: 'DESC' } });
+  async listAllConversations(take = 50, skip = 0) {
+    return this.convRepo.find({ order: { updatedAt: 'DESC' }, take, skip });
   }
 }
