@@ -32,7 +32,7 @@ export class AnnouncementsService {
       }),
     );
     if (this.shouldEmitNow(publishAt)) {
-      this.events.emitToAll('announcement:new', a);
+      this.events.emitToAll('announcement:new', { id: a.id, audience: a.audience, classOfferingId: a.classOfferingId });
       a.realtimeSent = true;
       await this.repo.save(a);
     }
@@ -50,7 +50,7 @@ export class AnnouncementsService {
       .getMany();
     for (const a of due) {
       if (!a.publishAt) continue;
-      this.events.emitToAll('announcement:new', a);
+      this.events.emitToAll('announcement:new', { id: a.id, audience: a.audience, classOfferingId: a.classOfferingId });
       a.realtimeSent = true;
       await this.repo.save(a);
     }
@@ -98,8 +98,16 @@ export class AnnouncementsService {
     if (viewer.role !== UserRole.ADMIN && a.authorId !== viewer.id) {
       throw new ForbiddenException('Only the author or admin can edit');
     }
-    Object.assign(a, body);
-    return this.repo.save(a);
+    for (const [key, val] of Object.entries(body)) {
+      if (val !== undefined) (a as any)[key] = val;
+    }
+    const saved = await this.repo.save(a);
+    if (!saved.publishAt && !saved.realtimeSent) {
+      this.events.emitToAll('announcement:new', { id: saved.id, audience: saved.audience, classOfferingId: saved.classOfferingId });
+      saved.realtimeSent = true;
+      await this.repo.save(saved);
+    }
+    return saved;
   }
 
   async remove(id: string) {

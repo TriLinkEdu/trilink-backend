@@ -230,6 +230,8 @@ export class ReportsService {
     const offerings = await this.coRepo.find({ where: { id: In(coIds) } });
     const coToSubject = new Map(offerings.map((o) => [o.id, o.subjectId]));
     const subjectIds = [...new Set(offerings.map((o) => o.subjectId))];
+    if (!subjectIds.length) return { studentId, subjects: [] as unknown[] };
+
     const subjects = await this.subjectRepo.find({ where: { id: In(subjectIds) } });
     const subjectName = new Map(subjects.map((s) => [s.id, s.name]));
 
@@ -246,10 +248,13 @@ export class ReportsService {
     }
 
     const attempts = await this.attRepo.find({ where: { studentId }, order: { releasedAt: 'DESC' } });
+    const released = attempts.filter((a) => a.releasedAt != null && a.score != null);
+    const examIds = [...new Set(released.map((a) => a.examId))];
+    const exams = examIds.length ? await this.examRepo.find({ where: { id: In(examIds) } }) : [];
+    const examMap = new Map(exams.map((e) => [e.id, e]));
     const coIdSet = new Set(coIds);
-    for (const a of attempts) {
-      if (!a.releasedAt || a.score == null) continue;
-      const exam = await this.examRepo.findOne({ where: { id: a.examId } });
+    for (const a of released) {
+      const exam = examMap.get(a.examId);
       if (!exam?.classOfferingId || !coIdSet.has(exam.classOfferingId)) continue;
       const subjId = coToSubject.get(exam.classOfferingId);
       if (!subjId) continue;

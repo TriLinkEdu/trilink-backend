@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsIn, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User, UserRole } from '../users/entities/user.entity';
@@ -12,7 +12,7 @@ class BroadcastDto {
   @ApiProperty() @IsString() @MinLength(1) title: string;
   @ApiProperty() @IsString() @MinLength(1) body: string;
   @ApiProperty({ enum: ['class', 'all_students'] })
-  @IsEnum(['class', 'all_students'] as const)
+  @IsIn(['class', 'all_students'])
   audience: BroadcastAudience;
 
   @ApiProperty({ required: false, description: 'Required when audience is class' })

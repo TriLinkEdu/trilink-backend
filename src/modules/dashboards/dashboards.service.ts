@@ -62,16 +62,16 @@ export class DashboardsService {
 
     const publishedExamsCount = await this.exams.count({ where: { published: true } });
     const totalAttempts = await this.attempts.count();
-    const releasedWithScore = await this.attempts
+    const scoreAgg = await this.attempts
       .createQueryBuilder('a')
       .where('a.released_at IS NOT NULL')
       .andWhere('a.score IS NOT NULL')
-      .getMany();
-    let avgReleasedScore: number | null = null;
-    if (releasedWithScore.length) {
-      const sum = releasedWithScore.reduce((a, x) => a + (x.score ?? 0), 0);
-      avgReleasedScore = Math.round((sum / releasedWithScore.length) * 100) / 100;
-    }
+      .select('AVG(a.score)', 'avg')
+      .addSelect('COUNT(*)', 'cnt')
+      .getRawOne();
+    const avgReleasedScore = scoreAgg?.avg != null
+      ? Math.round(parseFloat(scoreAgg.avg) * 100) / 100
+      : null;
 
     const recentAnnouncements = await this.announcements.find({
       order: { createdAt: 'DESC' },
