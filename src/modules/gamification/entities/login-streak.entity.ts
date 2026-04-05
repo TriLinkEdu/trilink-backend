@@ -16,7 +16,7 @@ export class LoginStreak {
   longestStreak: number;
 
   /** UTC date YYYY-MM-DD of last counted login. */
-  @Column({ name: 'last_login_date', type: 'varchar', length: 10, nullable: true })
+  @Column({ name: 'last_login_date', type: 'date', nullable: true })
   lastLoginDate: string | null;
 
   @UpdateDateColumn({ name: 'updated_at' })

@@ -61,14 +61,16 @@ export class NotificationsService {
         throw new ForbiddenException('Only admins can notify all students');
       }
       const students = await this.userRepo.find({ where: { role: UserRole.STUDENT } });
-      for (const s of students) {
-        await this.createForUser(s.id, {
-          type: 'broadcast',
-          title: dto.title,
-          body: dto.body,
-          payloadJson: JSON.stringify({ audience: 'all_students' }),
-        });
-      }
+      await Promise.all(
+        students.map((s) =>
+          this.createForUser(s.id, {
+            type: 'broadcast',
+            title: dto.title,
+            body: dto.body,
+            payloadJson: JSON.stringify({ audience: 'all_students' }),
+          }),
+        ),
+      );
       return { audience: 'all_students', sent: students.length };
     }
 
@@ -86,14 +88,16 @@ export class NotificationsService {
     const enr = await this.enrRepo.find({
       where: { classOfferingId: dto.classOfferingId, status: 'active' },
     });
-    for (const e of enr) {
-      await this.createForUser(e.studentId, {
-        type: 'broadcast',
-        title: dto.title,
-        body: dto.body,
-        payloadJson: JSON.stringify({ classOfferingId: dto.classOfferingId }),
-      });
-    }
+    await Promise.all(
+      enr.map((e) =>
+        this.createForUser(e.studentId, {
+          type: 'broadcast',
+          title: dto.title,
+          body: dto.body,
+          payloadJson: JSON.stringify({ classOfferingId: dto.classOfferingId }),
+        }),
+      ),
+    );
     return { audience: 'class', classOfferingId: dto.classOfferingId, sent: enr.length };
   }
 }

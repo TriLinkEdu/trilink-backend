@@ -81,7 +81,8 @@ export class GamificationController {
   })
   leaderboard(@Query('academicYearId') academicYearId: string, @Query('limit') limit?: string) {
     if (!academicYearId) throw new BadRequestException('academicYearId query required');
-    return this.gam.leaderboardByExamAverage(academicYearId, limit ? parseInt(limit, 10) : 20);
+    const n = parseInt(limit ?? '', 10);
+    return this.gam.leaderboardByExamAverage(academicYearId, Number.isFinite(n) ? n : 20);
   }
 
   @Get('students/:studentId/badges')
@@ -108,6 +109,7 @@ export class GamificationController {
   @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
   @ApiOperation({ summary: 'Leaderboard by current login streak' })
   streakLeaderboard(@Query('limit') limit?: string) {
-    return this.gam.leaderboardStreaks(limit ? parseInt(limit, 10) : 20);
+    const n = parseInt(limit ?? '', 10);
+    return this.gam.leaderboardStreaks(Number.isFinite(n) ? n : 20);
   }
 }

@@ -56,7 +56,10 @@ export class FeedbackController {
   @Get()
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'List all feedback (author hidden when anonymous)' })
-  list(@Query('subjectId') subjectId?: string, @Query('teacherId') teacherId?: string) {
+  list(
+    @Query('subjectId', new ParseUUIDPipe({ optional: true })) subjectId?: string,
+    @Query('teacherId', new ParseUUIDPipe({ optional: true })) teacherId?: string,
+  ) {
     return this.svc.list({ subjectId, teacherId });
   }
 

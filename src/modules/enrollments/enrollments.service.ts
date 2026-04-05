@@ -43,37 +43,38 @@ export class EnrollmentsService {
       where: { studentId, status: 'active' },
       order: { createdAt: 'DESC' },
     });
-    const out: unknown[] = [];
-    for (const e of rows) {
-      const co = await this.classRepo.findOne({ where: { id: e.classOfferingId } });
-      if (!co) continue;
-      const [grade, section, subject, teacher] = await Promise.all([
-        this.gradeRepo.findOne({ where: { id: co.gradeId } }),
-        this.sectionRepo.findOne({ where: { id: co.sectionId } }),
-        this.subjectRepo.findOne({ where: { id: co.subjectId } }),
-        this.userRepo.findOne({ where: { id: co.teacherId } }),
-      ]);
-      out.push({
-        enrollmentId: e.id,
-        academicYearId: e.academicYearId,
-        classOfferingId: co.id,
-        className: co.name,
-        grade: grade?.name ?? null,
-        section: section?.name ?? null,
-        subject: subject
-          ? { id: subject.id, name: subject.name, code: subject.code }
-          : null,
-        teacher: teacher
-          ? {
-              id: teacher.id,
-              firstName: teacher.firstName,
-              lastName: teacher.lastName,
-              email: teacher.email,
-            }
-          : null,
-      });
-    }
-    return out;
+    const results = await Promise.all(
+      rows.map(async (e) => {
+        const co = await this.classRepo.findOne({ where: { id: e.classOfferingId } });
+        if (!co) return null;
+        const [grade, section, subject, teacher] = await Promise.all([
+          this.gradeRepo.findOne({ where: { id: co.gradeId } }),
+          this.sectionRepo.findOne({ where: { id: co.sectionId } }),
+          this.subjectRepo.findOne({ where: { id: co.subjectId } }),
+          this.userRepo.findOne({ where: { id: co.teacherId } }),
+        ]);
+        return {
+          enrollmentId: e.id,
+          academicYearId: e.academicYearId,
+          classOfferingId: co.id,
+          className: co.name,
+          grade: grade?.name ?? null,
+          section: section?.name ?? null,
+          subject: subject
+            ? { id: subject.id, name: subject.name, code: subject.code }
+            : null,
+          teacher: teacher
+            ? {
+                id: teacher.id,
+                firstName: teacher.firstName,
+                lastName: teacher.lastName,
+                email: teacher.email,
+              }
+            : null,
+        };
+      }),
+    );
+    return results.filter((r) => r !== null);
   }
 
   async listMine(studentId: string) {

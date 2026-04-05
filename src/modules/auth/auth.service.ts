@@ -59,7 +59,9 @@ export class AuthService {
       user.id,
       JSON.stringify({ accountRole: user.role, portalRole: dto.role }),
     );
-    void this.gamification.recordLogin(user.id).catch(() => undefined);
+    void this.gamification.recordLogin(user.id).catch((e) => {
+      this.logger.warn('recordLogin failed', e instanceof Error ? e.message : e);
+    });
     return res;
   }
 

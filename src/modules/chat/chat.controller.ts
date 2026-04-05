@@ -68,8 +68,10 @@ export class ChatController {
   @Get('conversations/all')
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Admin: list all conversations (moderation)' })
-  listAllForAdmin() {
-    return this.chat.listAllConversations();
+  listAllForAdmin(@Query('take') take?: string, @Query('skip') skip?: string) {
+    const t = Math.min(Math.max(parseInt(take ?? '', 10) || 50, 1), 200);
+    const s = Math.max(parseInt(skip ?? '', 10) || 0, 0);
+    return this.chat.listAllConversations(t, s);
   }
 
   @Get('conversations/:id')

@@ -247,21 +247,31 @@ export class GamificationService implements OnModuleInit {
 
   /** Call after successful password login (not refresh). */
   async recordLogin(userId: string): Promise<LoginStreak> {
-    const today = this.utcDateString(new Date());
+    const now = new Date();
+    const today = this.utcDateString(now);
     let row = await this.streakRepo.findOne({ where: { userId } });
     if (!row) {
-      return this.streakRepo.save(
-        this.streakRepo.create({
-          userId,
-          currentStreak: 1,
-          longestStreak: 1,
-          lastLoginDate: today,
-        }),
-      );
+      try {
+        return await this.streakRepo.save(
+          this.streakRepo.create({
+            userId,
+            currentStreak: 1,
+            longestStreak: 1,
+            lastLoginDate: today,
+          }),
+        );
+      } catch (e: any) {
+        if (e?.code === '23505') {
+          row = await this.streakRepo.findOne({ where: { userId } });
+          if (!row) throw e;
+        } else {
+          throw e;
+        }
+      }
     }
     if (row.lastLoginDate === today) return row;
 
-    const y = new Date();
+    const y = new Date(now);
     y.setUTCDate(y.getUTCDate() - 1);
     const yesterday = this.utcDateString(y);
 
@@ -286,7 +296,7 @@ export class GamificationService implements OnModuleInit {
   }
 
   async leaderboardStreaks(limit = 20) {
-    const take = Math.min(Math.max(limit, 1), 100);
+    const take = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 100) : 20;
     const rows = await this.streakRepo.find({
       order: { currentStreak: 'DESC', longestStreak: 'DESC' },
       take,
