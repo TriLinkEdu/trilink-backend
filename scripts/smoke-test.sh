@@ -164,6 +164,7 @@ c=$(curl -sS -o /tmp/smoke_body.json -w "%{http_code}" -X POST "$BASE/api/subjec
   -d "{\"name\":\"SmokeMath-$EPOCH\",\"code\":\"SM$EPOCH\"}")
 [[ "$c" == "200" || "$c" == "201" ]] || die "create subject $c $(cat /tmp/smoke_body.json)"
 SUBJECT_ID=$(json_get ".id")
+[[ -n "$SUBJECT_ID" ]] || die "no subject id"
 ok "POST /api/subjects"
 
 c=$(curl -sS -o /tmp/smoke_body.json -w "%{http_code}" -X POST "$BASE/api/class-offerings" \
@@ -230,6 +231,7 @@ c=$(curl -sS -o /tmp/smoke_body.json -w "%{http_code}" -X POST "$BASE/api/exams"
   -d "{\"title\":\"Smoke exam $EPOCH\",\"academicYearId\":\"$YEAR_ID\",\"classOfferingId\":\"$CLASS_ID\",\"opensAt\":\"$OPENS\",\"closesAt\":\"$CLOSES\",\"durationMinutes\":60,\"maxPoints\":100}")
 [[ "$c" == "200" || "$c" == "201" ]] || die "create exam $c $(cat /tmp/smoke_body.json)"
 EXAM_ID=$(json_get ".id")
+[[ -n "$EXAM_ID" ]] || die "no exam id"
 ok "POST /api/exams"
 
 c=$(curl -sS -o /tmp/smoke_body.json -w "%{http_code}" -X POST "$BASE/api/exams/$EXAM_ID/questions" \
@@ -245,6 +247,7 @@ ok "POST /api/exams/:id/publish"
 c=$(curl -sS -o /tmp/smoke_body.json -w "%{http_code}" -X POST "$BASE/api/exams/$EXAM_ID/attempts" "${sauth[@]}")
 [[ "$c" == "200" || "$c" == "201" ]] || die "start attempt $c $(cat /tmp/smoke_body.json)"
 ATTEMPT_ID=$(json_get ".id")
+[[ -n "$ATTEMPT_ID" ]] || die "no attempt id"
 ok "POST /api/exams/:id/attempts (student)"
 
 node -e "const fs=require('fs'); const q=process.argv[1]; fs.writeFileSync('/tmp/smoke_answers.json', JSON.stringify({answersJson: JSON.stringify({[q]:'4'})}));" "$QUESTION_ID"
