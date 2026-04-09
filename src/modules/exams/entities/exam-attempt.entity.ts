@@ -35,6 +35,20 @@ export class ExamAttempt {
   @Column({ name: 'violations_json', type: 'text', nullable: true })
   violationsJson: string | null;
 
+  /** Locked attempts cannot be resumed until a teacher explicitly allows rejoin. */
+  @Column({ name: 'is_locked', type: 'boolean', default: false })
+  isLocked: boolean;
+
+  @Column({ name: 'lock_reason', type: 'varchar', length: 255, nullable: true })
+  lockReason: string | null;
+
+  @Column({ name: 'locked_at', type: 'timestamp', nullable: true })
+  lockedAt: Date | null;
+
+  /** One-time override granted by teacher to resume a locked attempt. */
+  @Column({ name: 'reentry_allowed', type: 'boolean', default: false })
+  reentryAllowed: boolean;
+
   @Column({ name: 'needs_manual_grading', type: 'boolean', default: false })
   needsManualGrading: boolean;
 

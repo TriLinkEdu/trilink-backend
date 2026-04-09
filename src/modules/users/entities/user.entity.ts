@@ -55,6 +55,30 @@ export class User {
   @Column({ type: 'varchar', length: 120, nullable: true })
   department: string | null;
 
+  /** Teacher: homeroom class label; Student/Parent: null */
+  @Column({ name: 'homeroom_class', type: 'varchar', length: 80, nullable: true })
+  homeroomClass: string | null;
+
+  /** Teacher: years/summary of experience; Student/Parent: null */
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  experience: string | null;
+
+  /** Teacher profile address: country */
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  country: string | null;
+
+  /** Teacher profile address: city/state */
+  @Column({ name: 'city_state', type: 'varchar', length: 120, nullable: true })
+  cityState: string | null;
+
+  /** Teacher profile address: postal code */
+  @Column({ name: 'postal_code', type: 'varchar', length: 40, nullable: true })
+  postalCode: string | null;
+
+  /** Teacher office room label */
+  @Column({ name: 'office_room', type: 'varchar', length: 80, nullable: true })
+  officeRoom: string | null;
+
   /** Parent: child full name; Student/Teacher: null */
   @Column({ name: 'child_name', type: 'varchar', length: 200, nullable: true })
   childName: string | null;

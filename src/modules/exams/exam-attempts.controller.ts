@@ -32,9 +32,9 @@ class GradeDto {
   score: number;
 }
 class ControlAttemptDto {
-  @ApiProperty({ enum: ['force_submit', 'warn'] })
+  @ApiProperty({ enum: ['force_submit', 'warn', 'allow_rejoin'] })
   @IsString()
-  action: 'force_submit' | 'warn';
+  action: 'force_submit' | 'warn' | 'allow_rejoin';
 
   @ApiProperty({ required: false })
   @IsOptional()
@@ -96,8 +96,7 @@ export class ExamAttemptsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ViolationDto,
   ) {
-    await this.exams.recordViolation(id, dto.reason || 'Tab switch detected');
-    return { ok: true };
+    return this.exams.recordViolation(id, dto.reason || 'Tab switch detected');
   }
 
   @Get(':id/violations')
