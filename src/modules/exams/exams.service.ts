@@ -191,8 +191,29 @@ export class ExamsService {
     const u = await this.userRepo.findOne({ where: { id: studentId } });
     if (!u || u.role !== UserRole.STUDENT) throw new BadRequestException('Must be student');
     const dup = await this.attRepo.findOne({ where: { examId, studentId } });
-    if (dup) throw new ConflictException('Attempt already exists');
-    return this.attRepo.save(
+    if (dup) {
+      if (dup.submittedAt) throw new ConflictException('Attempt already submitted');
+      if (dup.isLocked && !dup.reentryAllowed) {
+        throw new ForbiddenException('Attempt is locked. Wait for teacher re-entry approval.');
+      }
+      if (dup.reentryAllowed) {
+        dup.reentryAllowed = false;
+        dup.isLocked = false;
+        dup.lockReason = null;
+        dup.lockedAt = null;
+      }
+      const resumed = await this.attRepo.save(dup);
+      this.events.emitToUser(e.createdById, 'attempt:activity', {
+        attemptId: resumed.id,
+        examId: resumed.examId,
+        studentId: resumed.studentId,
+        kind: 'resume',
+        status: resumed.submittedAt ? 'submitted' : 'in_progress',
+        timestamp: new Date().toISOString(),
+      });
+      return resumed;
+    }
+    const created = await this.attRepo.save(
       this.attRepo.create({
         examId,
         studentId,
@@ -201,6 +222,15 @@ export class ExamsService {
         needsManualGrading: false,
       }),
     );
+    this.events.emitToUser(e.createdById, 'attempt:activity', {
+      attemptId: created.id,
+      examId: created.examId,
+      studentId: created.studentId,
+      kind: 'start',
+      status: 'in_progress',
+      timestamp: new Date().toISOString(),
+    });
+    return created;
   }
 
   async saveAnswers(attemptId: string, answersJson: string) {
@@ -292,6 +322,14 @@ export class ExamsService {
     if (refreshed) {
       const exam = await this.examRepo.findOne({ where: { id: refreshed.examId } });
       if (exam) {
+        this.events.emitToUser(exam.createdById, 'attempt:activity', {
+          attemptId: refreshed.id,
+          examId: refreshed.examId,
+          studentId: refreshed.studentId,
+          kind: 'submit',
+          status: 'submitted',
+          timestamp: new Date().toISOString(),
+        });
         const student = await this.userRepo.findOne({ where: { id: refreshed.studentId } });
         const name = student ? `${student.firstName} ${student.lastName}` : 'A student';
         await this.notifications.createForUser(exam.createdById, {
@@ -546,10 +584,10 @@ export class ExamsService {
 
   // ── Violations (exam integrity) ────────────────────────────────────────────
 
-  async recordViolation(attemptId: string, reason: string): Promise<void> {
+  async recordViolation(attemptId: string, reason: string): Promise<{ ok: true; locked: boolean; lockReason?: string }> {
     const a = await this.attRepo.findOne({ where: { id: attemptId } });
     if (!a) throw new NotFoundException('Attempt not found');
-    if (a.submittedAt) return; // don't record violations after submission
+    if (a.submittedAt) return { ok: true, locked: false }; // don't record violations after submission
     let violations: Array<{ reason: string; timestamp: string }> = [];
     try {
       violations = JSON.parse(a.violationsJson || '[]');
@@ -558,6 +596,16 @@ export class ExamsService {
     }
     violations.push({ reason, timestamp: new Date().toISOString() });
     a.violationsJson = JSON.stringify(violations);
+
+    const normalized = this.norm(reason);
+    const shouldLock = normalized.includes('tab') || normalized.includes('fullscreen') || normalized.includes('focus');
+    if (shouldLock && !a.isLocked) {
+      a.isLocked = true;
+      a.reentryAllowed = false;
+      a.lockReason = reason.slice(0, 255);
+      a.lockedAt = new Date();
+    }
+
     await this.attRepo.save(a);
 
     // Broadcast violation to the teacher (exam owner)
@@ -571,29 +619,80 @@ export class ExamsService {
         timestamp: new Date().toISOString(),
         violationCount: violations.length,
       });
+      this.events.emitToUser(exam.createdById, 'attempt:activity', {
+        attemptId: a.id,
+        examId: a.examId,
+        studentId: a.studentId,
+        kind: shouldLock ? 'locked' : 'violation',
+        status: a.submittedAt ? 'submitted' : 'in_progress',
+        reason,
+        violationCount: violations.length,
+        timestamp: new Date().toISOString(),
+      });
     }
+    return { ok: true, locked: a.isLocked, lockReason: a.lockReason ?? undefined };
   }
 
-  async controlAttempt(attemptId: string, action: 'force_submit' | 'warn', message: string, viewer: User) {
+  async controlAttempt(attemptId: string, action: 'force_submit' | 'warn' | 'allow_rejoin', message: string, viewer: User) {
     const a = await this.attRepo.findOne({ where: { id: attemptId } });
     if (!a) throw new NotFoundException('Attempt not found');
     const exam = await this.examRepo.findOne({ where: { id: a.examId } });
     if (!exam) throw new NotFoundException('Exam not found');
     this.assertExamEditor(exam, viewer);
 
-    // Emit control event to the student
+    if (action === 'allow_rejoin') {
+      a.isLocked = false;
+      a.lockReason = null;
+      a.lockedAt = null;
+      a.reentryAllowed = true;
+      await this.attRepo.save(a);
+      this.events.emitToUser(a.studentId, 'attempt:control', {
+        attemptId: a.id,
+        action,
+        message: message || 'Teacher allowed you to rejoin the exam.',
+      });
+      this.events.emitToUser(exam.createdById, 'attempt:activity', {
+        attemptId: a.id,
+        examId: a.examId,
+        studentId: a.studentId,
+        kind: 'allow_rejoin',
+        status: 'in_progress',
+        timestamp: new Date().toISOString(),
+      });
+      return { success: true };
+    }
+
+    // Emit control event to the student for warn/force_submit flows.
     this.events.emitToUser(a.studentId, 'attempt:control', {
       attemptId: a.id,
       action,
       message,
     });
 
-    if (action === 'force_submit') {
-      // We don't mark as submitted here because the client should do it to ensure answers are saved,
-      // but if the client is offline/closed, we might want a server-side force submit later.
-      // For now, we rely on the client handling the event.
+    if (action === 'force_submit' && !a.submittedAt) {
+      a.submittedAt = new Date();
+      await this.attRepo.save(a);
+      await this.computeAndApplyAutoGrade(a.id);
+      this.events.emitToUser(exam.createdById, 'attempt:activity', {
+        attemptId: a.id,
+        examId: a.examId,
+        studentId: a.studentId,
+        kind: 'force_submit',
+        status: 'submitted',
+        timestamp: new Date().toISOString(),
+      });
+    } else if (action === 'warn') {
+      this.events.emitToUser(exam.createdById, 'attempt:activity', {
+        attemptId: a.id,
+        examId: a.examId,
+        studentId: a.studentId,
+        kind: 'warn',
+        status: a.submittedAt ? 'submitted' : 'in_progress',
+        reason: message,
+        timestamp: new Date().toISOString(),
+      });
     }
-    
+
     return { success: true };
   }
 
@@ -650,6 +749,10 @@ export class ExamsService {
         score: att?.score ?? null,
         releasedAt: att?.releasedAt ?? null,
         attemptId: att?.id ?? null,
+        isLocked: !!att?.isLocked,
+        lockReason: att?.lockReason ?? null,
+        lockedAt: att?.lockedAt ?? null,
+        reentryAllowed: !!att?.reentryAllowed,
         violationCount: att?.violationsJson
           ? (() => {
               try {

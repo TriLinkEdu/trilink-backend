@@ -154,6 +154,12 @@ export class UsersService {
         | 'section'
         | 'subject'
         | 'department'
+        | 'homeroomClass'
+        | 'experience'
+        | 'country'
+        | 'cityState'
+        | 'postalCode'
+        | 'officeRoom'
         | 'childName'
         | 'relationship'
       >
@@ -171,6 +177,12 @@ export class UsersService {
       'section',
       'subject',
       'department',
+      'homeroomClass',
+      'experience',
+      'country',
+      'cityState',
+      'postalCode',
+      'officeRoom',
       'childName',
       'relationship',
     ] as const satisfies readonly (keyof User)[];

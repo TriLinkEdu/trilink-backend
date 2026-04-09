@@ -16,6 +16,12 @@ class PatchUserDto {
   @ApiPropertyOptional() @IsOptional() @IsString() section?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() subject?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() department?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() homeroomClass?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() experience?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() country?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() cityState?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() postalCode?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() officeRoom?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() childName?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() relationship?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() profileImageFileId?: string;

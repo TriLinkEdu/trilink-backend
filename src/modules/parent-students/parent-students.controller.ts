@@ -5,8 +5,9 @@ import { IsBoolean, IsOptional, IsString, IsUUID, MinLength } from 'class-valida
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { UserRole } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { ParentStudentsService } from './parent-students.service';
+import { CurrentUser } from '@/common/decorators/current-user.decorator';
 
 class LinkDto {
   @ApiProperty() @IsUUID() parentId: string;
@@ -18,23 +19,34 @@ class LinkDto {
 @ApiTags('Parents')
 @Controller('parent-students')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+
 @ApiBearerAuth('JWT')
 export class ParentStudentsController {
   constructor(private readonly svc: ParentStudentsService) {}
 
   @Get()
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'List parent-student links' })
   list(@Query('parentId') parentId?: string, @Query('studentId') studentId?: string) {
     return this.svc.list({ parentId, studentId });
   }
 
   @Post()
+  @Roles(UserRole.ADMIN)
   create(@Body() dto: LinkDto) {
     return this.svc.create(dto);
   }
 
+  @Get('/mychildren')
+  @Roles(UserRole.PARENT)
+  @ApiOperation({ summary: 'List my children' })
+  myChildren(@CurrentUser() user: User) {
+    const parentId = user.id;
+    return this.svc.myChildren(parentId);
+  }
+
   @Delete(':id')
+  @Roles(UserRole.ADMIN)
   async del(@Param('id', ParseUUIDPipe) id: string) {
     await this.svc.remove(id);
     return { ok: true };

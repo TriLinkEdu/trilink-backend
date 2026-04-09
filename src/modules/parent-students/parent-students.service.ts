@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { ParentStudent } from './entities/parent-student.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 
@@ -16,6 +16,31 @@ export class ParentStudentsService {
     if (q.parentId) where.parentId = q.parentId;
     if (q.studentId) where.studentId = q.studentId;
     return this.repo.find({ where: Object.keys(where).length ? where : {} });
+  }
+
+  async myChildren(parentId: string) {
+    const links = await this.repo.find({ where: { parentId } });
+    const studentIds = links.map(l => l.studentId);
+    if (!studentIds.length) return [];
+    const students = await this.userRepo.findBy({
+      id: In(studentIds),
+    });
+    // Only return non-sensitive fields
+    return links.map(link => {
+      const student = students.find(s => s.id === link.studentId);
+      return {
+        ...link,
+        student: student
+          ? {
+              id: student.id,
+              firstName: student.firstName,
+              lastName: student.lastName,
+              email: student.email,
+              // Add more non-sensitive fields as needed
+            }
+          : null,
+      };
+    });
   }
 
   async create(body: { parentId: string; studentId: string; relationship: string; isPrimary?: boolean }) {
