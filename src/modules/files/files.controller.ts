@@ -20,6 +20,7 @@ import { UserRole } from '../users/entities/user.entity';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { FilesService } from './files.service';
+import { UsersService } from '../users/users.service';
 import { randomUUID } from 'crypto';
 
 import { Public } from '../../common/decorators/public.decorator';
@@ -30,7 +31,10 @@ import { Public } from '../../common/decorators/public.decorator';
 @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
 @ApiBearerAuth('JWT')
 export class FilesController {
-  constructor(private readonly files: FilesService) {}
+  constructor(
+    private readonly files: FilesService,
+    private readonly users: UsersService,
+  ) {}
 
   @Post('upload')
   @ApiOperation({ summary: 'Multipart upload (field name: file)' })
@@ -48,7 +52,14 @@ export class FilesController {
     }),
   )
   async upload(@UploadedFile() file: Express.Multer.File, @CurrentUser() user: User) {
-    return this.files.uploadFile(file, user.id);
+    const uploadedFile = await this.files.uploadFile(file, user.id);
+    
+    // Automatically bind the newly uploaded image as the user's profile picture
+    if (file.mimetype.startsWith('image/')) {
+      await this.users.patchMe(user.id, { profileImageFileId: uploadedFile.id });
+    }
+    
+    return uploadedFile;
   }
 
   @Get(':id')
