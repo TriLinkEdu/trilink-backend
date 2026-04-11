@@ -2,19 +2,38 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FileRecord } from './entities/file-record.entity';
+import { v2 as cloudinary } from 'cloudinary';
+import * as streamifier from 'streamifier';
 
 @Injectable()
 export class FilesService {
-  constructor(@InjectRepository(FileRecord) private readonly repo: Repository<FileRecord>) {}
-
-  async saveFromDisk(file: Express.Multer.File, uploadedById: string) {
-    const rec = this.repo.create({
-      filename: file.originalname,
-      mime: file.mimetype,
-      path: file.path,
-      uploadedById,
+  constructor(@InjectRepository(FileRecord) private readonly repo: Repository<FileRecord>) {
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
     });
-    return this.repo.save(rec);
+  }
+
+  async uploadFile(file: Express.Multer.File, uploadedById: string) {
+    return new Promise<FileRecord>((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder: 'trilink_uploads', resource_type: 'auto' },
+        async (error, result) => {
+          if (error) return reject(error);
+          if (!result) return reject(new Error('Cloudinary returned no result'));
+          
+          const rec = this.repo.create({
+            filename: file.originalname,
+            mime: file.mimetype,
+            path: result.secure_url,
+            uploadedById,
+          });
+          resolve(await this.repo.save(rec));
+        },
+      );
+      streamifier.createReadStream(file.buffer).pipe(uploadStream);
+    });
   }
 
   async get(id: string) {
