@@ -112,8 +112,11 @@ export class UsersService {
   }
 
   toPublic(u: User) {
-    const { passwordHash: _p, ...rest } = u;
-    return rest;
+    const { passwordHash: _p, profileImageFileId, ...rest } = u;
+    return {
+      ...rest,
+      profileImagePath: profileImageFileId ? `/api/files/${profileImageFileId}/download` : null,
+    };
   }
 
   async listUsers(filters: { role?: UserRole; q?: string }): Promise<Partial<User>[]> {
@@ -124,7 +127,7 @@ export class UsersService {
       qb.andWhere('(u.email LIKE :s OR u.first_name LIKE :s OR u.last_name LIKE :s)', { s });
     }
     const rows = await qb.getMany();
-    return rows.map((u) => this.toPublic(u) as User);
+    return rows.map((u) => this.toPublic(u) as any);
   }
 
   async changePassword(userId: string, currentPassword: string, newPassword: string) {
@@ -195,7 +198,7 @@ export class UsersService {
     }
 
     const saved = await this.userRepo.save(u);
-    return this.toPublic(saved) as User;
+    return this.toPublic(saved) as any;
   }
 
   async patchMe(
@@ -213,6 +216,6 @@ export class UsersService {
     if (body.profileImageFileId !== undefined) u.profileImageFileId = body.profileImageFileId;
     
     const saved = await this.userRepo.save(u);
-    return this.toPublic(saved) as User;
+    return this.toPublic(saved) as any;
   }
 }
