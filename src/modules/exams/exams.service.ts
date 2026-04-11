@@ -25,6 +25,7 @@ export type ExamCreateInput = {
   opensAt: Date;
   closesAt: Date;
   durationMinutes: number;
+  minStayMinutes?: number;
   createdById: string;
   maxPoints?: number;
 };
@@ -36,6 +37,7 @@ export class ExamsService {
     @InjectRepository(Exam) private readonly examRepo: Repository<Exam>,
     @InjectRepository(ExamQuestion) private readonly eqRepo: Repository<ExamQuestion>,
     @InjectRepository(ExamAttempt) private readonly attRepo: Repository<ExamAttempt>,
+    @InjectRepository(Enrollment) private readonly enrollmentRepo: Repository<Enrollment>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
     private readonly notifications: NotificationsService,
@@ -54,6 +56,16 @@ export class ExamsService {
     if (viewer.role === UserRole.TEACHER && exam.createdById === viewer.id) return;
     if (viewer.role === UserRole.STUDENT && exam.published) return;
     throw new ForbiddenException('Cannot view this exam questions');
+  }
+
+  private async assertStudentClassAccess(exam: Exam, studentId: string) {
+    if (!exam.classOfferingId) return;
+    const enrollment = await this.enrollmentRepo.findOne({
+      where: { classOfferingId: exam.classOfferingId, studentId },
+    });
+    if (!enrollment) {
+      throw new ForbiddenException('This exam is not assigned to your class.');
+    }
   }
 
   private async notifyExamResultReleased(attempt: ExamAttempt, exam: Exam) {
@@ -119,6 +131,10 @@ export class ExamsService {
 
   // Exams
   async createExam(body: ExamCreateInput) {
+    const minStay = Math.max(0, Math.floor(body.minStayMinutes ?? 0));
+    if (minStay > body.durationMinutes) {
+      throw new BadRequestException('minStayMinutes cannot exceed durationMinutes');
+    }
     return this.examRepo.save(
       this.examRepo.create({
         title: body.title,
@@ -127,6 +143,7 @@ export class ExamsService {
         opensAt: body.opensAt,
         closesAt: body.closesAt,
         durationMinutes: body.durationMinutes,
+        minStayMinutes: minStay,
         createdById: body.createdById,
         maxPoints: body.maxPoints ?? 100,
         published: false,
@@ -142,11 +159,20 @@ export class ExamsService {
     return this.examRepo.save(e);
   }
 
-  listExams(yearId: string | undefined, viewer: User) {
+  async listExams(yearId: string | undefined, viewer: User) {
     const qb = this.examRepo.createQueryBuilder('e').orderBy('e.opensAt', 'DESC');
     if (yearId) qb.andWhere('e.academic_year_id = :y', { y: yearId });
     if (viewer.role === UserRole.STUDENT) {
       qb.andWhere('e.published = :pub', { pub: true });
+      const enrollments = await this.enrollmentRepo.find({
+        where: yearId ? { studentId: viewer.id, academicYearId: yearId } : { studentId: viewer.id },
+      });
+      const classIds = [...new Set(enrollments.map((e) => e.classOfferingId))];
+      if (classIds.length > 0) {
+        qb.andWhere('(e.class_offering_id IS NULL OR e.class_offering_id IN (:...classIds))', { classIds });
+      } else {
+        qb.andWhere('e.class_offering_id IS NULL');
+      }
     } else if (viewer.role === UserRole.TEACHER) {
       qb.andWhere('e.created_by_id = :uid', { uid: viewer.id });
     }
@@ -172,7 +198,32 @@ export class ExamsService {
   async listExamQuestions(examId: string, viewer: User) {
     const ex = await this.oneExam(examId);
     this.assertExamQuestionsVisible(ex, viewer);
-    return this.eqRepo.find({ where: { examId }, order: { orderIndex: 'ASC' } });
+
+    if (viewer.role === UserRole.STUDENT) {
+      await this.assertStudentClassAccess(ex, viewer.id);
+    }
+
+    const rows = await this.eqRepo.find({ where: { examId }, order: { orderIndex: 'ASC' } });
+    const qIds = [...new Set(rows.map((r) => r.questionId))];
+    const questions = qIds.length ? await this.qRepo.find({ where: { id: In(qIds) } }) : [];
+    const qMap = new Map(questions.map((q) => [q.id, q]));
+
+    return rows.map((row) => {
+      const q = qMap.get(row.questionId);
+      const base = {
+        id: row.questionId,
+        examQuestionId: row.id,
+        questionId: row.questionId,
+        examId: row.examId,
+        orderIndex: row.orderIndex,
+        points: row.points,
+        type: q?.type ?? 'mcq',
+        stem: q?.stem ?? '',
+        optionsJson: q?.optionsJson ?? null,
+      };
+      if (viewer.role === UserRole.STUDENT) return base;
+      return { ...base, answerKey: q?.answerKey ?? null };
+    });
   }
   async publish(examId: string, viewer: User) {
     const e = await this.oneExam(examId);
@@ -190,6 +241,7 @@ export class ExamsService {
     if (now < e.opensAt || now > e.closesAt) throw new BadRequestException('Outside exam window');
     const u = await this.userRepo.findOne({ where: { id: studentId } });
     if (!u || u.role !== UserRole.STUDENT) throw new BadRequestException('Must be student');
+    await this.assertStudentClassAccess(e, studentId);
     const dup = await this.attRepo.findOne({ where: { examId, studentId } });
     if (dup) {
       if (dup.submittedAt) throw new ConflictException('Attempt already submitted');

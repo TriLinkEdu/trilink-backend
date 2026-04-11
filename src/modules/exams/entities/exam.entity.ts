@@ -23,6 +23,10 @@ export class Exam {
   @Column({ name: 'duration_minutes', type: 'int' })
   durationMinutes: number;
 
+  /** Minimum time a student must stay before submitting. 0 means no minimum stay lock. */
+  @Column({ name: 'min_stay_minutes', type: 'int', default: 0 })
+  minStayMinutes: number;
+
   /** Scale for final score (e.g. 100). Auto and manual grades are clamped to this. */
   @Column({ name: 'max_points', type: 'int', default: 100 })
   maxPoints: number;

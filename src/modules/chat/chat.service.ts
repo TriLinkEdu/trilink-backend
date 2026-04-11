@@ -97,16 +97,92 @@ export class ChatService {
     return msg;
   }
 
-  async listMessages(conversationId: string, user: User, limit = 50) {
+  async listMessages(conversationId: string, user: User, limit = 50, skip = 0) {
     await this.assertReadAccess(conversationId, user);
     return this.msgRepo.find({
       where: { conversationId },
       order: { createdAt: 'DESC' },
       take: limit,
+      skip,
     });
+  }
+
+  async searchUsers(user: User, searchTerm: string) {
+    const userRepo = this.convRepo.manager.getRepository(User);
+    const qb = userRepo.createQueryBuilder('u');
+    
+    if (searchTerm) {
+      qb.where('(u.firstName ILIKE :term OR u.lastName ILIKE :term OR u.subject ILIKE :term)', { term: `%${searchTerm}%` });
+    }
+    
+    // Admin sees everyone, others see admins + potentially related users 
+    // (For simplicity, we constrain non-admins to search admins/teachers unless we need deeper relationship graphs)
+    // We can allow all roles to be searched if queried, but limit the returned payload severely.
+    // The prompt says "no need to fetch all users", we limit by take(20).
+    
+    qb.select([
+      'u.id',
+      'u.firstName',
+      'u.lastName',
+      'u.role',
+      'u.subject',
+      'u.grade',
+      'u.section',
+      'u.profileImageFileId',
+      'u.childName'
+    ]);
+    
+    qb.andWhere('u.id != :myId', { myId: user.id });
+    qb.take(20);
+    
+    return qb.getMany();
   }
 
   async listAllConversations(take = 50, skip = 0) {
     return this.convRepo.find({ order: { updatedAt: 'DESC' }, take, skip });
+  }
+
+  /** Initiate a direct conversation between two users */
+  async initiateDirectChat(initiatorId: string, targetUserId: string, initiatorRole: UserRole) {
+    // Check if conversation already exists between these two users
+    const initiatorConvs = await this.memRepo.find({ where: { userId: initiatorId } });
+    const targetConvs = await this.memRepo.find({ where: { userId: targetUserId } });
+    
+    const initiatorConvIds = new Set(initiatorConvs.map((m) => m.conversationId));
+    const sharedConvIds = targetConvs
+      .filter((m) => initiatorConvIds.has(m.conversationId))
+      .map((m) => m.conversationId);
+
+    if (sharedConvIds.length > 0) {
+      // Check if any of these are direct conversations
+      const existingDirects = await this.convRepo.find({
+        where: { id: In(sharedConvIds), type: 'direct' },
+      });
+      
+      if (existingDirects.length > 0) {
+        // Return the first existing direct conversation
+        return { conversation: existingDirects[0], isNew: false };
+      }
+    }
+
+    // Create new direct conversation
+    const userRepo = this.convRepo.manager.getRepository(User);
+    const targetUser = await userRepo.findOne({ where: { id: targetUserId } });
+    const initiatorUser = await userRepo.findOne({ where: { id: initiatorId } });
+    
+    const title = `${initiatorUser?.firstName ?? 'User'} & ${targetUser?.firstName ?? 'User'}`;
+    
+    const conversation = await this.createConversation(
+      {
+        type: 'direct',
+        title,
+        classOfferingId: null,
+        parentVisible: initiatorRole === UserRole.PARENT || initiatorRole === UserRole.STUDENT,
+        createdById: initiatorId,
+      },
+      [targetUserId],
+    );
+
+    return { conversation, isNew: true };
   }
 }

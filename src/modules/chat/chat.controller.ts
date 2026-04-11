@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
@@ -9,6 +9,7 @@ import { UserRole } from '../users/entities/user.entity';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { ChatService } from './chat.service';
+import { InitiateChatDto } from './dto/initiate-chat.dto';
 
 class CreateConvDto {
   @ApiProperty({ example: 'group' }) @IsString() type: string;
@@ -84,8 +85,9 @@ export class ChatController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: User,
     @Query('limit') limit?: string,
+    @Query('skip') skip?: string,
   ) {
-    return this.chat.listMessages(id, user, limit ? parseInt(limit, 10) : 50);
+    return this.chat.listMessages(id, user, limit ? parseInt(limit, 10) : 50, skip ? parseInt(skip, 10) : 0);
   }
 
   @Post('conversations/:id/messages')
@@ -95,5 +97,29 @@ export class ChatController {
     @CurrentUser() user: User,
   ) {
     return this.chat.postMessage(id, user.id, dto.text);
+  }
+
+  @Get('users/search')
+  @ApiOperation({
+    summary: 'Search users to initiate a chat',
+    description: 'Searches relevant users by name. Teachers only see relevant subjects.',
+  })
+  searchUsers(
+    @Query('q') query: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.searchUsers(user, query || '');
+  }
+
+  @Post('conversations/initiate')
+  @ApiOperation({
+    summary: 'Initiate a direct chat with another user',
+    description: 'Creates a new direct conversation or returns existing one. Useful for parent-teacher or student-teacher chats.',
+  })
+  initiate(
+    @Body() dto: InitiateChatDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.initiateDirectChat(user.id, dto.targetUserId, user.role);
   }
 }

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -9,9 +9,12 @@ import { UserRole } from '../users/entities/user.entity';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { FeedbackService } from './feedback.service';
+import { FeedbackType } from './entities/feedback.entity';
 
 class FCreate {
-  @ApiProperty() @IsString() @MinLength(2) category: string;
+  @ApiProperty({ enum: FeedbackType, enumName: 'FeedbackType' })
+  @IsEnum(FeedbackType)
+  category: FeedbackType;
   @ApiProperty() @IsString() @MinLength(1) message: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() subjectId?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() teacherId?: string;

@@ -20,6 +20,9 @@ export class Announcement {
   @Column({ name: 'class_offering_id', type: 'uuid', nullable: true })
   classOfferingId: string | null;
 
+  @Column({ name: 'target_grade', type: 'varchar', length: 40, nullable: true })
+  targetGrade: string | null;
+
   @Column({ name: 'author_id', type: 'uuid' })
   authorId: string;
 
