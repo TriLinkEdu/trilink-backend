@@ -25,6 +25,8 @@ import { User } from '../users/entities/user.entity';
 import { FilesService } from './files.service';
 import { randomUUID } from 'crypto';
 
+import { Public } from '../../common/decorators/public.decorator';
+
 @ApiTags('Files')
 @Controller('files')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -66,6 +68,7 @@ export class FilesController {
     return this.files.get(id);
   }
 
+  @Public()
   @Get(':id/download')
   @ApiOperation({ summary: 'Download file content (authenticated)' })
   async download(@Param('id', ParseUUIDPipe) id: string) {
