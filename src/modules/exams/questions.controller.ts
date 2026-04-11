@@ -39,8 +39,14 @@ export class QuestionsController {
   }
 
   @Get()
-  list(@Query('subjectId') subjectId?: string) {
-    return this.exams.listQuestions(subjectId);
+  list(
+    @Query('subjectId') subjectId?: string,
+    @Query('skip') skip?: string,
+    @Query('take') take?: string,
+  ) {
+    const skipNum = skip ? parseInt(skip, 10) : 0;
+    const takeNum = take ? parseInt(take, 10) : 30;
+    return this.exams.listQuestions(subjectId, skipNum, takeNum);
   }
 
   @Delete(':id')
