@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Feedback } from './entities/feedback.entity';
+import { Feedback, FeedbackType } from './entities/feedback.entity';
 
 function sanitizeForViewer(row: Feedback): Omit<Feedback, 'authorId'> & { authorId: string | null } {
   const { authorId, ...rest } = row;
@@ -17,7 +17,7 @@ export class FeedbackService {
 
   create(body: {
     authorId: string | null;
-    category: string;
+    category: FeedbackType;
     message: string;
     subjectId?: string | null;
     teacherId?: string | null;
