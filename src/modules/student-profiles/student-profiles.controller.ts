@@ -42,4 +42,11 @@ export class StudentProfilesController {
   one(@Param('studentUserId', ParseUUIDPipe) studentUserId: string, @CurrentUser() user: User) {
     return this.profiles.getForViewer(studentUserId, user);
   }
+
+  @Get(':studentUserId/detail')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({ summary: 'Student detail with profile, classes, subjects and teachers' })
+  detail(@Param('studentUserId', ParseUUIDPipe) studentUserId: string, @CurrentUser() user: User) {
+    return this.profiles.getDetailedForViewer(studentUserId, user);
+  }
 }
