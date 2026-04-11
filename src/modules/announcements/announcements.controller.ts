@@ -27,6 +27,7 @@ class AnnDto {
   @ApiProperty() @IsString() body: string;
   @ApiProperty({ example: 'all' }) @IsString() audience: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() classOfferingId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() targetGrade?: string;
   @ApiPropertyOptional({ description: 'ISO 8601 — hidden from students/parents until this time' })
   @IsOptional()
   @IsDateString()
@@ -38,6 +39,7 @@ class AnnPatchDto {
   @ApiPropertyOptional() @IsOptional() @IsString() body?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() audience?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() classOfferingId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() targetGrade?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() publishAt?: string;
 }
 
@@ -85,6 +87,7 @@ export class AnnouncementsController {
       body: dto.body,
       audience: dto.audience,
       classOfferingId: dto.classOfferingId,
+      targetGrade: dto.targetGrade,
       publishAt:
         dto.publishAt === undefined ? undefined : dto.publishAt ? new Date(dto.publishAt) : null,
     }, user);
