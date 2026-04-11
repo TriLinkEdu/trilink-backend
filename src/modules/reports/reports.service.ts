@@ -10,6 +10,8 @@ import { Exam } from '../exams/entities/exam.entity';
 import { Enrollment } from '../enrollments/entities/enrollment.entity';
 import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
 import { Subject } from '../school-structure/entities/subject.entity';
+import { Grade } from '../school-structure/entities/grade.entity';
+import { Section } from '../school-structure/entities/section.entity';
 
 @Injectable()
 export class ReportsService {
@@ -23,10 +25,22 @@ export class ReportsService {
     @InjectRepository(Enrollment) private readonly enrRepo: Repository<Enrollment>,
     @InjectRepository(ClassOffering) private readonly coRepo: Repository<ClassOffering>,
     @InjectRepository(Subject) private readonly subjectRepo: Repository<Subject>,
+    @InjectRepository(Grade) private readonly gradeRepo: Repository<Grade>,
+    @InjectRepository(Section) private readonly sectionRepo: Repository<Section>,
   ) {}
 
   async assertStudentViewer(viewer: User, studentId: string) {
-    if (viewer.role === UserRole.ADMIN || viewer.role === UserRole.TEACHER) return;
+    if (viewer.role === UserRole.ADMIN) return;
+    if (viewer.role === UserRole.TEACHER) {
+      const enrollments = await this.enrRepo.find({ where: { studentId, status: 'active' } });
+      const classIds = enrollments.map((e) => e.classOfferingId);
+      if (!classIds.length) {
+        throw new ForbiddenException('Teacher cannot access students outside their classes');
+      }
+      const owns = await this.coRepo.findOne({ where: { id: In(classIds), teacherId: viewer.id } });
+      if (owns) return;
+      throw new ForbiddenException('Teacher cannot access students outside their classes');
+    }
     if (viewer.role === UserRole.STUDENT && viewer.id === studentId) return;
     if (viewer.role === UserRole.PARENT) {
       const link = await this.psRepo.findOne({ where: { parentId: viewer.id, studentId } });
@@ -90,6 +104,40 @@ export class ReportsService {
       averageScore: avg != null ? Math.round(avg * 100) / 100 : null,
       recent: detail.slice(0, 15),
     };
+  }
+
+  private resolveDateRange(periodType: 'weekly' | 'monthly' | 'custom', startDate?: string, endDate?: string) {
+    const now = new Date();
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    const start = new Date(now);
+
+    if (periodType === 'weekly') {
+      start.setDate(start.getDate() - 6);
+      start.setHours(0, 0, 0, 0);
+      return { start, end };
+    }
+
+    if (periodType === 'monthly') {
+      start.setDate(start.getDate() - 29);
+      start.setHours(0, 0, 0, 0);
+      return { start, end };
+    }
+
+    if (!startDate || !endDate) {
+      throw new BadRequestException('startDate and endDate are required when periodType is custom');
+    }
+    const customStart = new Date(startDate);
+    const customEnd = new Date(endDate);
+    if (Number.isNaN(customStart.getTime()) || Number.isNaN(customEnd.getTime())) {
+      throw new BadRequestException('Invalid date format (use YYYY-MM-DD)');
+    }
+    customStart.setHours(0, 0, 0, 0);
+    customEnd.setHours(23, 59, 59, 999);
+    if (customStart > customEnd) {
+      throw new BadRequestException('startDate cannot be after endDate');
+    }
+    return { start: customStart, end: customEnd };
   }
 
   async performanceReport(studentId: string, viewer: User) {
@@ -272,5 +320,228 @@ export class ReportsService {
     }
 
     return { studentId, subjects: [...bySubject.values()] };
+  }
+
+  /** Generate comprehensive report for a student for weekly, monthly, or custom ranges. */
+  async studentReport(
+    studentId: string,
+    viewer: User,
+    periodType: 'weekly' | 'monthly' | 'custom',
+    startDate?: string,
+    endDate?: string,
+  ) {
+    await this.assertStudentViewer(viewer, studentId);
+    const u = await this.userRepo.findOne({ where: { id: studentId } });
+    if (!u || u.role !== UserRole.STUDENT) throw new NotFoundException('Student not found');
+
+    const { start, end } = this.resolveDateRange(periodType, startDate, endDate);
+    const startStr = start.toISOString().slice(0, 10);
+    const endStr = end.toISOString().slice(0, 10);
+
+    const enrollments = await this.enrRepo.find({ where: { studentId, status: 'active' } });
+    const coIds = enrollments.map((e) => e.classOfferingId);
+    const offerings = coIds.length ? await this.coRepo.find({ where: { id: In(coIds) } }) : [];
+    const gradeIds = [...new Set(offerings.map((o) => o.gradeId))];
+    const sectionIds = [...new Set(offerings.map((o) => o.sectionId))];
+    const subjectIds = [...new Set(offerings.map((o) => o.subjectId))];
+    const teacherIds = [...new Set(offerings.map((o) => o.teacherId))];
+    const [subjects, grades, sections, teachers] = await Promise.all([
+      subjectIds.length ? this.subjectRepo.find({ where: { id: In(subjectIds) } }) : Promise.resolve([]),
+      gradeIds.length ? this.gradeRepo.find({ where: { id: In(gradeIds) } }) : Promise.resolve([]),
+      sectionIds.length ? this.sectionRepo.find({ where: { id: In(sectionIds) } }) : Promise.resolve([]),
+      teacherIds.length ? this.userRepo.find({ where: { id: In(teacherIds), role: UserRole.TEACHER } }) : Promise.resolve([]),
+    ]);
+    const subjectMap = new Map(subjects.map((s) => [s.id, s]));
+    const gradeMap = new Map(grades.map((g) => [g.id, g]));
+    const sectionMap = new Map(sections.map((s) => [s.id, s]));
+    const teacherMap = new Map(teachers.map((t) => [t.id, t]));
+
+    const attendance = await this.attendanceBreakdown(studentId, startStr, endStr);
+    const exams = await this.examSummary(studentId, start, end);
+
+    const sessionList = await this.sessRepo.find({ where: coIds.length ? { classOfferingId: In(coIds) } : {} });
+    const sessionsInRange = sessionList.filter((s) => s.date >= startStr && s.date <= endStr);
+    const sessionsById = new Map(sessionsInRange.map((s) => [s.id, s]));
+    const marks = await this.markRepo.find({ where: { studentId } });
+    const markRows = marks.filter((m) => sessionsById.has(m.sessionId));
+
+    const attempts = await this.attRepo.find({ where: { studentId }, order: { releasedAt: 'DESC' } });
+    const releasedAttempts = attempts.filter((a) => a.releasedAt && a.releasedAt >= start && a.releasedAt <= end && a.score != null);
+    const releasedExamIds = [...new Set(releasedAttempts.map((a) => a.examId))];
+    const releasedExams = releasedExamIds.length ? await this.examRepo.find({ where: { id: In(releasedExamIds) } }) : [];
+    const releasedExamMap = new Map(releasedExams.map((e) => [e.id, e]));
+
+    const perCourse = offerings.map((co) => {
+      const subject = subjectMap.get(co.subjectId);
+      const grade = gradeMap.get(co.gradeId);
+      const section = sectionMap.get(co.sectionId);
+      const teacher = teacherMap.get(co.teacherId);
+
+      const courseMarks = markRows
+        .filter((m) => sessionsById.get(m.sessionId)?.classOfferingId === co.id)
+        .map((m) => {
+          const session = sessionsById.get(m.sessionId);
+          return {
+            sessionId: m.sessionId,
+            date: session?.date ?? null,
+            status: m.status,
+            note: m.note,
+          };
+        });
+      const statusCounts: Record<string, number> = {};
+      for (const row of courseMarks) {
+        statusCounts[row.status] = (statusCounts[row.status] || 0) + 1;
+      }
+      const totalAttendance = courseMarks.length;
+      const presentLike = (statusCounts.present || 0) + (statusCounts.late || 0);
+      const attendancePercent = totalAttendance > 0 ? Math.round((presentLike / totalAttendance) * 10000) / 100 : null;
+
+      const courseAttempts = releasedAttempts
+        .filter((a) => releasedExamMap.get(a.examId)?.classOfferingId === co.id)
+        .map((a) => {
+          const exam = releasedExamMap.get(a.examId);
+          return {
+            attemptId: a.id,
+            examId: a.examId,
+            examTitle: exam?.title ?? null,
+            score: a.score,
+            maxPoints: exam?.maxPoints ?? 100,
+            releasedAt: a.releasedAt,
+          };
+        });
+      const avgScore = courseAttempts.length
+        ? Math.round(
+            (courseAttempts.reduce((sum, x) => sum + ((x.score ?? 0) / (x.maxPoints || 100)) * 100, 0) / courseAttempts.length) *
+              100,
+          ) / 100
+        : null;
+
+      return {
+        classOffering: {
+          id: co.id,
+          name: co.name,
+          grade: { id: grade?.id ?? co.gradeId, name: grade?.name ?? null },
+          section: { id: section?.id ?? co.sectionId, name: section?.name ?? null },
+          subject: { id: subject?.id ?? co.subjectId, name: subject?.name ?? null, code: subject?.code ?? null },
+          teacher: teacher
+            ? {
+                id: teacher.id,
+                firstName: teacher.firstName,
+                lastName: teacher.lastName,
+                email: teacher.email,
+                phone: teacher.phone,
+                profileImageFileId: teacher.profileImageFileId,
+              }
+            : { id: co.teacherId, firstName: null, lastName: null, email: null, phone: null, profileImageFileId: null },
+        },
+        attendance: {
+          totals: {
+            total: totalAttendance,
+            present: statusCounts.present || 0,
+            late: statusCounts.late || 0,
+            absent: statusCounts.absent || 0,
+            excused: statusCounts.excused || 0,
+            attendancePercent,
+            scoringRule: 'excused counts as absent in percentage',
+          },
+          details: courseMarks,
+        },
+        assessments: {
+          averagePercent: avgScore,
+          releasedCount: courseAttempts.length,
+          details: courseAttempts,
+        },
+      };
+    });
+
+    const subjectAverages = perCourse
+      .map((c) => c.assessments.averagePercent)
+      .filter((x): x is number => x !== null);
+    const weeklyOrMonthlyAverageSubjectsPercent = subjectAverages.length
+      ? Math.round((subjectAverages.reduce((a, b) => a + b, 0) / subjectAverages.length) * 100) / 100
+      : null;
+    const attendancePercent =
+      attendance.totalMarks > 0
+        ? Math.round(((((attendance.byStatus['present'] || 0) + (attendance.byStatus['late'] || 0)) / attendance.totalMarks) * 100) * 100) /
+          100
+        : null;
+
+    return {
+      studentId,
+      student: {
+        id: u.id,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        grade: u.grade,
+        section: u.section,
+        phone: u.phone,
+        profileImageFileId: u.profileImageFileId,
+      },
+      period: {
+        type: periodType,
+        startDate: startStr,
+        endDate: endStr,
+      },
+      generatedAt: new Date().toISOString(),
+      summary: {
+        overallSubjectsAveragePercent: weeklyOrMonthlyAverageSubjectsPercent,
+        overallAttendancePercent: attendancePercent,
+        attendanceScoringRule: 'excused is counted as absent in percentage calculations',
+      },
+      attendance,
+      exams,
+      courses: perCourse,
+    };
+  }
+
+  /** Get teachers for a student (based on enrollments) */
+  async getStudentTeachers(studentId: string, viewer: User) {
+    await this.assertStudentViewer(viewer, studentId);
+    const u = await this.userRepo.findOne({ where: { id: studentId } });
+    if (!u || u.role !== UserRole.STUDENT) throw new NotFoundException('Student not found');
+
+    // Get active enrollments
+    const enrollments = await this.enrRepo.find({ where: { studentId, status: 'active' } });
+    const coIds = enrollments.map((e) => e.classOfferingId);
+    if (!coIds.length) return { studentId, teachers: [] };
+
+    // Get class offerings and teacher IDs
+    const offerings = await this.coRepo.find({ where: { id: In(coIds) } });
+    const teacherIds = [...new Set(offerings.map((o) => o.teacherId))];
+    if (!teacherIds.length) return { studentId, teachers: [] };
+
+    // Get teacher details
+    const teachers = await this.userRepo.find({ where: { id: In(teacherIds), role: UserRole.TEACHER } });
+
+    // Get subject details
+    const subjectIds = [...new Set(offerings.map((o) => o.subjectId))];
+    const subjects = subjectIds.length ? await this.subjectRepo.find({ where: { id: In(subjectIds) } }) : [];
+    const subjectMap = new Map(subjects.map((s) => [s.id, s.name]));
+
+    // Map teachers to their subjects
+    const teacherSubjects = new Map<string, string[]>();
+    for (const offering of offerings) {
+      const subjectName = subjectMap.get(offering.subjectId) ?? 'Unknown';
+      if (!teacherSubjects.has(offering.teacherId)) {
+        teacherSubjects.set(offering.teacherId, []);
+      }
+      if (!teacherSubjects.get(offering.teacherId)!.includes(subjectName)) {
+        teacherSubjects.get(offering.teacherId)!.push(subjectName);
+      }
+    }
+
+    return {
+      studentId,
+      teachers: teachers.map((t) => ({
+        id: t.id,
+        firstName: t.firstName,
+        lastName: t.lastName,
+        email: t.email,
+        phone: t.phone,
+        department: t.department,
+        subjects: teacherSubjects.get(t.id) ?? [],
+        profileImageFileId: t.profileImageFileId,
+      })),
+    };
   }
 }

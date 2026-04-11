@@ -1,4 +1,4 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, ParseUUIDPipe, Query, UseGuards, UseInterceptors } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -61,5 +61,57 @@ export class ReportsController {
   @ApiOperation({ summary: 'Grades by subject (released exams in enrolled classes)' })
   myGrades(@CurrentUser() user: User) {
     return this.reports.myGradesBySubject(user);
+  }
+
+  @Get('students/:studentId/report')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({
+    summary: 'Comprehensive student report (weekly, monthly, or custom date range)',
+    description:
+      'Access rules: student self, linked parent, teacher of student\'s enrolled classes, or admin. Includes populated class/subject/teacher details, attendance detail, and assessment aggregates.',
+  })
+  @ApiQuery({
+    name: 'periodType',
+    required: false,
+    example: 'weekly',
+    description: 'weekly | monthly | custom (default: custom)',
+  })
+  @ApiQuery({
+    name: 'startDate',
+    required: false,
+    example: '2026-01-01',
+    description: 'Required when periodType=custom (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    example: '2026-01-31',
+    description: 'Required when periodType=custom (YYYY-MM-DD)',
+  })
+  studentReport(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @CurrentUser() user: User,
+    @Query('periodType') periodType?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const normalizedType = (periodType ?? 'custom').toLowerCase();
+    if (normalizedType === 'custom' && (!startDate || !endDate)) {
+      throw new BadRequestException('startDate and endDate query parameters are required for custom period');
+    }
+    if (!['weekly', 'monthly', 'custom'].includes(normalizedType)) {
+      throw new BadRequestException('periodType must be one of: weekly, monthly, custom');
+    }
+    return this.reports.studentReport(studentId, user, normalizedType as 'weekly' | 'monthly' | 'custom', startDate, endDate);
+  }
+
+  @Get('students/:studentId/teachers')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({
+    summary: 'Get list of teachers for a student',
+    description: 'Returns teachers based on student enrollments. Useful for parent-teacher communication.',
+  })
+  getTeachers(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
+    return this.reports.getStudentTeachers(studentId, user);
   }
 }
