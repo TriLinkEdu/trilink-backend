@@ -15,6 +15,9 @@ import { ClassOffering } from '../class-offerings/entities/class-offering.entity
 import { NotificationsService } from '../notifications/notifications.service';
 import { GamificationService } from '../gamification/gamification.service';
 import { User, UserRole } from '../users/entities/user.entity';
+import { Grade } from '../school-structure/entities/grade.entity';
+import { Section } from '../school-structure/entities/section.entity';
+import { Subject } from '../school-structure/entities/subject.entity';
 
 @Injectable()
 export class AttendanceService {
@@ -119,6 +122,27 @@ export class AttendanceService {
       }),
     );
     return { studentId, marks: enriched };
+  }
+
+  async reportStudentByDay(studentId: string, viewer: User, date: string) {
+    await this.assertStudentViewer(viewer, studentId);
+    const marks = await this.markRepo.find({ where: { studentId } });
+    const enriched = await Promise.all(
+      marks.map(async (m) => {
+        const s = await this.sessRepo.findOne({ where: { id: m.sessionId } });
+        return { m, s };
+      }),
+    );
+    const filtered = enriched.filter((obj) => obj.s && obj.s.date === date);
+    return {
+      studentId,
+      date,
+      records: filtered.map((f) => ({
+        classOfferingId: f.s?.classOfferingId,
+        status: f.m.status,
+        note: f.m.note,
+      })),
+    };
   }
 
   async reportClass(classOfferingId: string) {
