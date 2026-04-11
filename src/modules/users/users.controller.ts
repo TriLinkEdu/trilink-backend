@@ -27,6 +27,13 @@ class PatchUserDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() profileImageFileId?: string;
 }
 
+class PatchMeDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() phone?: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() profileImageFileId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() currentPassword?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() newPassword?: string;
+}
+
 @ApiTags('Users')
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -51,8 +58,8 @@ export class UsersController {
 
   @Patch('me')
   @ApiOperation({ summary: 'Update own profile' })
-  patchMe(@CurrentUser() user: User, @Body() body: PatchUserDto) {
-    return this.users.patchUser(user.id, body);
+  patchMe(@CurrentUser() user: User, @Body() body: PatchMeDto) {
+    return this.users.patchMe(user.id, body);
   }
 
   @Patch(':id')

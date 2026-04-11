@@ -197,4 +197,22 @@ export class UsersService {
     const saved = await this.userRepo.save(u);
     return this.toPublic(saved) as User;
   }
+
+  async patchMe(
+    id: string,
+    body: { phone?: string; profileImageFileId?: string; currentPassword?: string; newPassword?: string },
+  ) {
+    const u = await this.findById(id);
+    if (!u) throw new NotFoundException('User not found');
+    
+    if (body.currentPassword && body.newPassword) {
+      await this.changePassword(id, body.currentPassword, body.newPassword);
+    }
+    
+    if (body.phone !== undefined) u.phone = body.phone;
+    if (body.profileImageFileId !== undefined) u.profileImageFileId = body.profileImageFileId;
+    
+    const saved = await this.userRepo.save(u);
+    return this.toPublic(saved) as User;
+  }
 }
