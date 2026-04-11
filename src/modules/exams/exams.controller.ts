@@ -32,6 +32,10 @@ class ExamDto {
   @ApiProperty() @IsString() opensAt: string;
   @ApiProperty() @IsString() closesAt: string;
   @ApiProperty() @IsNumber() durationMinutes: number;
+  @ApiProperty({ required: false, default: 0, description: 'Minimum number of minutes a student must stay before submit is allowed.' })
+  @IsOptional()
+  @IsNumber()
+  minStayMinutes?: number;
   @ApiProperty({ required: false, default: 100, description: 'Scale for scores (auto + manual clamp to this)' })
   @IsOptional()
   @IsNumber()
@@ -75,6 +79,7 @@ export class ExamsController {
       opensAt: new Date(dto.opensAt),
       closesAt: new Date(dto.closesAt),
       durationMinutes: dto.durationMinutes,
+      minStayMinutes: dto.minStayMinutes,
       createdById: user.id,
       maxPoints: dto.maxPoints,
     });

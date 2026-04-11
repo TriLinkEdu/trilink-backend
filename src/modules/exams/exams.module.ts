@@ -5,6 +5,7 @@ import { Exam } from './entities/exam.entity';
 import { ExamQuestion } from './entities/exam-question.entity';
 import { ExamAttempt } from './entities/exam-attempt.entity';
 import { User } from '../users/entities/user.entity';
+import { Enrollment } from '../enrollments/entities/enrollment.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { GamificationModule } from '../gamification/gamification.module';
@@ -15,7 +16,7 @@ import { ExamAttemptsController } from './exam-attempts.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Question, Exam, ExamQuestion, ExamAttempt, User, ParentStudent]),
+    TypeOrmModule.forFeature([Question, Exam, ExamQuestion, ExamAttempt, Enrollment, User, ParentStudent]),
     NotificationsModule,
     GamificationModule,
   ],

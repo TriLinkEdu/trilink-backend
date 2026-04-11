@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags, ApiPropertyOptional, ApiQuery } from '@nestjs/swagger';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsArray, IsString, IsUUID, ValidateNested, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -63,9 +63,24 @@ export class AttendanceController {
     return this.svc.getMarks(id);
   }
 
+  @Get('reports/attendance/student/:studentId/by-day')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({
+    summary: 'Get attendance for student on a specific date with course detail',
+    description: 'Returns each session/course and mark detail (present, absent, excused, etc.) for requested date.',
+  })
+  @ApiQuery({ name: 'date', required: true, example: '2026-01-15', description: 'Date to retrieve (YYYY-MM-DD)' })
+  repStudentByDay(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @CurrentUser() user: User,
+    @Query('date') date: string,
+  ) {
+    return this.svc.reportStudentByDay(studentId, user, date);
+  }
+
   @Get('reports/attendance/student/:studentId')
   @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
-  @ApiOperation({ summary: 'Student attendance report (self, linked parent, or staff)' })
+  @ApiOperation({ summary: 'Student attendance summary (self, linked parent, or staff)' })
   repStudent(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
     return this.svc.reportStudent(studentId, user);
   }
