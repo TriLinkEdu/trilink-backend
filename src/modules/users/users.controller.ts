@@ -27,9 +27,7 @@ class PatchUserDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() profileImageFileId?: string;
 }
 
-class PatchMeDto {
-  @ApiPropertyOptional() @IsOptional() @IsString() phone?: string;
-  @ApiPropertyOptional() @IsOptional() @IsUUID() profileImageFileId?: string;
+class PatchMeDto extends PatchUserDto {
   @ApiPropertyOptional() @IsOptional() @IsString() currentPassword?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() newPassword?: string;
 }

@@ -203,7 +203,7 @@ export class UsersService {
 
   async patchMe(
     id: string,
-    body: { phone?: string; profileImageFileId?: string; currentPassword?: string; newPassword?: string },
+    body: Partial<Pick<User, 'firstName' | 'lastName' | 'phone' | 'profileImageFileId' | 'grade' | 'section' | 'subject' | 'department' | 'homeroomClass' | 'experience' | 'country' | 'cityState' | 'postalCode' | 'officeRoom' | 'childName' | 'relationship'>> & { currentPassword?: string; newPassword?: string },
   ) {
     const u = await this.findById(id);
     if (!u) throw new NotFoundException('User not found');
@@ -212,8 +212,31 @@ export class UsersService {
       await this.changePassword(id, body.currentPassword, body.newPassword);
     }
     
-    if (body.phone !== undefined) u.phone = body.phone;
-    if (body.profileImageFileId !== undefined) u.profileImageFileId = body.profileImageFileId;
+    const keys = [
+      'firstName',
+      'lastName',
+      'phone',
+      'profileImageFileId',
+      'grade',
+      'section',
+      'subject',
+      'department',
+      'homeroomClass',
+      'experience',
+      'country',
+      'cityState',
+      'postalCode',
+      'officeRoom',
+      'childName',
+      'relationship',
+    ] as const satisfies readonly (keyof User)[];
+
+    for (const key of keys) {
+      const v = body[key];
+      if (v !== undefined && v !== null) {
+        (u as Record<(typeof keys)[number], unknown>)[key] = v;
+      }
+    }
     
     const saved = await this.userRepo.save(u);
     return this.toPublic(saved) as any;
