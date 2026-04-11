@@ -4,17 +4,14 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
-  StreamableFile,
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  Res,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import type { Request } from 'express';
-import { extname } from 'path';
-import * as fs from 'fs';
-import { createReadStream } from 'fs';
+import { memoryStorage } from 'multer';
+import type { Request, Response } from 'express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -46,20 +43,12 @@ export class FilesController {
   })
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: (_req: Request, _file: Express.Multer.File, cb: (e: Error | null, p: string) => void) => {
-          const dir = 'uploads';
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          cb(null, dir);
-        },
-        filename: (_req: Request, file: Express.Multer.File, cb: (e: Error | null, p: string) => void) =>
-          cb(null, `${randomUUID()}${extname(file.originalname)}`),
-      }),
+      storage: memoryStorage(),
       limits: { fileSize: 10 * 1024 * 1024 },
     }),
   )
   async upload(@UploadedFile() file: Express.Multer.File, @CurrentUser() user: User) {
-    return this.files.saveFromDisk(file, user.id);
+    return this.files.uploadFile(file, user.id);
   }
 
   @Get(':id')
@@ -71,12 +60,8 @@ export class FilesController {
   @Public()
   @Get(':id/download')
   @ApiOperation({ summary: 'Download file content (authenticated)' })
-  async download(@Param('id', ParseUUIDPipe) id: string) {
+  async download(@Param('id', ParseUUIDPipe) id: string, @Res() res: Response) {
     const rec = await this.files.getOrThrow(id);
-    const stream = createReadStream(rec.path);
-    return new StreamableFile(stream, {
-      type: rec.mime,
-      disposition: `inline; filename="${encodeURIComponent(rec.filename)}"`,
-    });
+    return res.redirect(rec.path);
   }
 }
