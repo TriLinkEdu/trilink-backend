@@ -40,7 +40,7 @@ export class AnnouncementsService {
       }),
     );
     if (this.shouldEmitNow(publishAt)) {
-      this.events.emitToAll('announcement:new', { id: a.id, audience: a.audience, classOfferingId: a.classOfferingId, targetGrade: a.targetGrade });
+      this.events.emitToAll('announcement:new', { id: a.id, audience: a.audience, classOfferingId: a.classOfferingId, targetGrade: a.targetGrade, title: a.title, body: a.body });
       await this.notifyTargets(a);
       a.realtimeSent = true;
       await this.repo.save(a);
@@ -94,7 +94,7 @@ export class AnnouncementsService {
       .getMany();
     for (const a of due) {
       if (!a.publishAt) continue;
-      this.events.emitToAll('announcement:new', { id: a.id, audience: a.audience, classOfferingId: a.classOfferingId, targetGrade: a.targetGrade });
+      this.events.emitToAll('announcement:new', { id: a.id, audience: a.audience, classOfferingId: a.classOfferingId, targetGrade: a.targetGrade, title: a.title, body: a.body });
       await this.notifyTargets(a);
       a.realtimeSent = true;
       await this.repo.save(a);
@@ -161,7 +161,7 @@ export class AnnouncementsService {
     }
     const saved = await this.repo.save(a);
     if (!saved.publishAt && !saved.realtimeSent) {
-      this.events.emitToAll('announcement:new', { id: saved.id, audience: saved.audience, classOfferingId: saved.classOfferingId, targetGrade: saved.targetGrade });
+      this.events.emitToAll('announcement:new', { id: saved.id, audience: saved.audience, classOfferingId: saved.classOfferingId, targetGrade: saved.targetGrade, title: saved.title, body: saved.body });
       await this.notifyTargets(saved);
       saved.realtimeSent = true;
       await this.repo.save(saved);

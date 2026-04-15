@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags, ApiQuery } from '@nestjs/swagger';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -104,6 +104,7 @@ export class ChatController {
     summary: 'Search users to initiate a chat',
     description: 'Searches relevant users by name. Teachers only see relevant subjects.',
   })
+  @ApiQuery({ name: 'q', required: false, description: 'Search term for name/subject' })
   searchUsers(
     @Query('q') query: string,
     @CurrentUser() user: User,

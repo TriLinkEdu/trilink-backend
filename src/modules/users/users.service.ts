@@ -112,11 +112,8 @@ export class UsersService {
   }
 
   toPublic(u: User) {
-    const { passwordHash: _p, profileImageFileId, ...rest } = u;
-    return {
-      ...rest,
-      profileImagePath: profileImageFileId ? `/api/files/${profileImageFileId}/download` : null,
-    };
+    const { passwordHash: _p, ...rest } = u;
+    return rest;
   }
 
   async listUsers(filters: { role?: UserRole; q?: string }): Promise<Partial<User>[]> {
@@ -127,7 +124,7 @@ export class UsersService {
       qb.andWhere('(u.email LIKE :s OR u.first_name LIKE :s OR u.last_name LIKE :s)', { s });
     }
     const rows = await qb.getMany();
-    return rows.map((u) => this.toPublic(u) as any);
+    return rows.map((u) => this.toPublic(u) as User);
   }
 
   async changePassword(userId: string, currentPassword: string, newPassword: string) {
@@ -198,47 +195,6 @@ export class UsersService {
     }
 
     const saved = await this.userRepo.save(u);
-    return this.toPublic(saved) as any;
-  }
-
-  async patchMe(
-    id: string,
-    body: Partial<Pick<User, 'firstName' | 'lastName' | 'phone' | 'profileImageFileId' | 'grade' | 'section' | 'subject' | 'department' | 'homeroomClass' | 'experience' | 'country' | 'cityState' | 'postalCode' | 'officeRoom' | 'childName' | 'relationship'>> & { currentPassword?: string; newPassword?: string },
-  ) {
-    const u = await this.findById(id);
-    if (!u) throw new NotFoundException('User not found');
-    
-    if (body.currentPassword && body.newPassword) {
-      await this.changePassword(id, body.currentPassword, body.newPassword);
-    }
-    
-    const keys = [
-      'firstName',
-      'lastName',
-      'phone',
-      'profileImageFileId',
-      'grade',
-      'section',
-      'subject',
-      'department',
-      'homeroomClass',
-      'experience',
-      'country',
-      'cityState',
-      'postalCode',
-      'officeRoom',
-      'childName',
-      'relationship',
-    ] as const satisfies readonly (keyof User)[];
-
-    for (const key of keys) {
-      const v = body[key];
-      if (v !== undefined && v !== null) {
-        (u as Record<(typeof keys)[number], unknown>)[key] = v;
-      }
-    }
-    
-    const saved = await this.userRepo.save(u);
-    return this.toPublic(saved) as any;
+    return this.toPublic(saved) as User;
   }
 }

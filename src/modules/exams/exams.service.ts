@@ -119,7 +119,9 @@ export class ExamsService {
   listQuestions(subjectId?: string, skip = 0, take = 50) {
     return this.qRepo.find({
       where: subjectId ? { subjectId } : {},
-      relations: ['subject'], skip, take,
+      relations: ['subject'],
+      skip,
+      take,
       order: { createdAt: 'DESC' },
     });
   }
@@ -817,57 +819,5 @@ export class ExamsService {
       };
     });
     return { examId, classOfferingId: ex.classOfferingId, students: out };
-  }
-
-
-  async bulkGradeAndRelease(examId: string, newMaxPoints: number | undefined, marks: {studentId: string, score: number}[], user: User) {
-    const exam = await this.oneExam(examId);
-
-    // Apply max points update if offered
-    if (newMaxPoints !== undefined && newMaxPoints !== exam.maxPoints) {
-      exam.maxPoints = newMaxPoints;
-      await this.examRepo.save(exam);
-    }
-
-    // Now process all student marks
-    for (const mark of marks) {
-      // Find existing attempt
-      let attempt = await this.attRepo.findOne({
-        where: { examId, studentId: mark.studentId }
-      });
-
-      if (!attempt) {
-        // Create manual attempt
-        attempt = this.attRepo.create({
-          examId,
-          studentId: mark.studentId,
-          startedAt: new Date(),
-          submittedAt: new Date(),
-          score: mark.score,
-          needsManualGrading: false,
-        });
-      } else {
-        // Update existing attempt
-        attempt.submittedAt = attempt.submittedAt || new Date();
-        attempt.score = mark.score;
-        attempt.needsManualGrading = false;
-      }
-      
-      await this.attRepo.save(attempt);
-      
-      // Dispatch notification
-      await this.notifications.createForUser(mark.studentId, {
-        
-        type: 'exam_graded',
-        title: `Exam Graded: ${exam.title}`,
-        body: `You received a score of ${mark.score}/${exam.maxPoints}`,
-        payloadJson: JSON.stringify({ examId: exam.id, score: mark.score, maxPoints: exam.maxPoints })
-      });
-    }
-
-    return { 
-      message: 'Successfully bulk graded ' + marks.length + ' students.',
-      updatedMaxPoints: exam.maxPoints
-    };
   }
 }
