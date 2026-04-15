@@ -15,7 +15,7 @@ import {
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiProperty } from '@nestjs/swagger';
-import {  IsArray, IsNumber, IsOptional, IsString, IsUUID, ValidateNested  } from 'class-validator';
+import { IsArray, IsNumber, IsOptional, IsString, IsUUID, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -59,16 +59,6 @@ class ExamQBody {
   @ValidateNested({ each: true })
   @Type(() => ExamQItem)
   items: ExamQItem[];
-}
-
-class BulkGradeDto {
-  @ApiProperty({ required: false, description: 'Optional new max points for the exam' })
-  @IsOptional() @IsNumber()
-  maxPoints?: number;
-
-  @ApiProperty({ description: 'Array of marks per student' })
-  @IsArray()
-  marks: { studentId: string; score: number }[];
 }
 
 @ApiTags('Exams')
@@ -137,13 +127,6 @@ export class ExamsController {
   @ApiOperation({ summary: 'Update exam grading scale (maxPoints)' })
   patchExam(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PatchExamDto, @CurrentUser() user: User) {
     return this.exams.updateExamMaxPoints(id, dto.maxPoints, user);
-  }
-
-  @Post(':id/bulk-grade')
-  @Roles(UserRole.ADMIN, UserRole.TEACHER)
-  @ApiOperation({ summary: 'Bulk grade all attempts and optionally update exam max points' })
-  bulkGrade(@Param('id', ParseUUIDPipe) id: string, @Body() body: BulkGradeDto, @CurrentUser() user: User) {
-    return this.exams.bulkGradeAndRelease(id, body.maxPoints, body.marks, user);
   }
 
   @Post(':id/questions')

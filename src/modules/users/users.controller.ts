@@ -27,11 +27,6 @@ class PatchUserDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() profileImageFileId?: string;
 }
 
-class PatchMeDto extends PatchUserDto {
-  @ApiPropertyOptional() @IsOptional() @IsString() currentPassword?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() newPassword?: string;
-}
-
 @ApiTags('Users')
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -46,6 +41,12 @@ export class UsersController {
     return this.users.listUsers({ role, q });
   }
 
+  @Get('search')
+  @ApiOperation({ summary: 'Search users to chat with (available to all users)' })
+  searchUsers(@Query('role') role?: UserRole, @Query('q') q?: string) {
+    return this.users.listUsers({ role, q });
+  }
+
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   async one(@Param('id', ParseUUIDPipe) id: string) {
@@ -56,8 +57,8 @@ export class UsersController {
 
   @Patch('me')
   @ApiOperation({ summary: 'Update own profile' })
-  patchMe(@CurrentUser() user: User, @Body() body: PatchMeDto) {
-    return this.users.patchMe(user.id, body);
+  patchMe(@CurrentUser() user: User, @Body() body: PatchUserDto) {
+    return this.users.patchUser(user.id, body);
   }
 
   @Patch(':id')

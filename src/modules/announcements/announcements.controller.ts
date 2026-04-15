@@ -28,6 +28,7 @@ class AnnDto {
   @ApiProperty({ example: 'all' }) @IsString() audience: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() classOfferingId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() targetGrade?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() targetSection?: string;
   @ApiPropertyOptional({ description: 'ISO 8601 — hidden from students/parents until this time' })
   @IsOptional()
   @IsDateString()
@@ -40,6 +41,7 @@ class AnnPatchDto {
   @ApiPropertyOptional() @IsOptional() @IsString() audience?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() classOfferingId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() targetGrade?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() targetSection?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() publishAt?: string;
 }
 

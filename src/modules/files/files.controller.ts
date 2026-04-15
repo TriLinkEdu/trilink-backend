@@ -56,7 +56,7 @@ export class FilesController {
     
     // Automatically bind the newly uploaded image as the user's profile picture
     if (file.mimetype.startsWith('image/')) {
-      await this.users.patchMe(user.id, { profileImageFileId: uploadedFile.id });
+      await this.users.patchUser(user.id, { profileImageFileId: uploadedFile.id });
     }
     
     return uploadedFile;
