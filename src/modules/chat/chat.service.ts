@@ -107,6 +107,27 @@ export class ChatService {
     });
   }
 
+  async getReadReceipts(messageId: string, user: User) {
+    const msg = await this.msgRepo.findOne({ where: { id: messageId } });
+    if (!msg) return [];
+
+    await this.assertReadAccess(msg.conversationId, user);
+
+    const members = await this.memRepo.find({
+      where: { conversationId: msg.conversationId },
+    });
+
+    // Conservative placeholder receipts: sender has read at creation time.
+    // Additional per-user read tracking can replace this without breaking API.
+    return members
+        .filter((m) => m.userId === msg.senderId)
+        .map((m) => ({
+          messageId: msg.id,
+          userId: m.userId,
+          readAt: msg.createdAt,
+        }));
+  }
+
   async searchUsers(user: User, searchTerm: string) {
     const userRepo = this.convRepo.manager.getRepository(User);
     const qb = userRepo.createQueryBuilder('u');
