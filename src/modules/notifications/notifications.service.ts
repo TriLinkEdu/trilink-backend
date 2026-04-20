@@ -43,6 +43,13 @@ export class NotificationsService {
     return this.repo.save(n);
   }
 
+  async markUnread(id: string, userId: string) {
+    const n = await this.repo.findOne({ where: { id, userId } });
+    if (!n) throw new NotFoundException('Notification not found');
+    n.readAt = null;
+    return this.repo.save(n);
+  }
+
   async markAllRead(userId: string) {
     await this.repo.update({ userId, readAt: IsNull() }, { readAt: new Date() });
     return { ok: true };

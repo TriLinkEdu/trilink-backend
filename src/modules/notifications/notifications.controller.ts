@@ -49,6 +49,11 @@ export class NotificationsController {
     return this.svc.markRead(id, user.id);
   }
 
+  @Patch(':id/unread')
+  unread(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.svc.markUnread(id, user.id);
+  }
+
   @Post('read-all')
   readAll(@CurrentUser() user: User) {
     return this.svc.markAllRead(user.id);
