@@ -295,6 +295,34 @@ export class GamificationService implements OnModuleInit {
     };
   }
 
+  async getMyProgress(userId: string) {
+    const [streak, points] = await Promise.all([
+      this.getLoginStreak(userId),
+      this.totalBadgePoints(userId),
+    ]);
+
+    const totalXp = points.totalBadgePoints ?? 0;
+    const level = Math.max(1, Math.floor(totalXp / 100));
+
+    return {
+      userId,
+      currentStreak: streak.currentStreak ?? 0,
+      longestStreak: streak.longestStreak ?? 0,
+      totalXp,
+      level,
+      levelTitle: this.levelTitle(level),
+      lastLoginDate: streak.lastLoginDate ?? null,
+    };
+  }
+
+  private levelTitle(level: number): string {
+    if (level >= 20) return 'Legend';
+    if (level >= 15) return 'Master';
+    if (level >= 10) return 'Scholar';
+    if (level >= 5) return 'Learner';
+    return 'Starter';
+  }
+
   async leaderboardStreaks(limit = 20) {
     const take = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 100) : 20;
     const rows = await this.streakRepo.find({

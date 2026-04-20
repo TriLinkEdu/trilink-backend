@@ -105,6 +105,13 @@ export class GamificationController {
     return this.gam.getLoginStreak(user.id);
   }
 
+  @Get('me/progress')
+  @Roles(UserRole.STUDENT, UserRole.PARENT, UserRole.TEACHER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'My combined gamification progress' })
+  myProgress(@CurrentUser() user: User) {
+    return this.gam.getMyProgress(user.id);
+  }
+
   @Get('leaderboard/streaks')
   @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
   @ApiOperation({ summary: 'Leaderboard by current login streak' })
