@@ -42,6 +42,15 @@ export class CalendarController {
     return this.svc.listForViewer(user, { from, to, yearId: academicYearId, classOfferingId });
   }
 
+  @Get(':id')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({
+    summary: 'Get event by id for current viewer scope',
+  })
+  getById(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.svc.getForViewer(user, id);
+  }
+
   @Post()
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @ApiOperation({ summary: 'Create event (uses your user as createdBy)' })
