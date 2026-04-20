@@ -162,6 +162,13 @@ export class FeedbackController {
     return this.svc.listForTeacher(user.id);
   }
 
+  @Get('me')
+  @Roles(UserRole.STUDENT, UserRole.PARENT, UserRole.TEACHER)
+  @ApiOperation({ summary: 'My feedback history' })
+  me(@CurrentUser() user: User) {
+    return this.svc.listMine(user.id);
+  }
+
   @Get()
   @Roles(UserRole.ADMIN)
   @ApiOperation({

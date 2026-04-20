@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { CalendarEvent } from './entities/calendar-event.entity';
@@ -53,6 +53,42 @@ export class CalendarService {
       qb.andWhere('(e.class_offering_id IS NULL OR e.class_offering_id IN (:...cids))', { cids: allowedClassIds });
     }
     return qb.getMany();
+  }
+
+  async getForViewer(user: User, id: string) {
+    const event = await this.repo.findOne({ where: { id } });
+    if (!event) throw new NotFoundException('Event not found');
+
+    if (user.role === UserRole.ADMIN || user.role === UserRole.TEACHER) {
+      return event;
+    }
+
+    if (!event.classOfferingId) {
+      return event;
+    }
+
+    let allowedClassIds: string[] = [];
+    if (user.role === UserRole.STUDENT) {
+      const enr = await this.enrRepo.find({
+        where: { studentId: user.id, status: 'active' },
+      });
+      allowedClassIds = enr.map((e) => e.classOfferingId);
+    } else if (user.role === UserRole.PARENT) {
+      const links = await this.psRepo.find({ where: { parentId: user.id } });
+      const studentIds = links.map((l) => l.studentId);
+      if (studentIds.length) {
+        const enr = await this.enrRepo.find({
+          where: { studentId: In(studentIds), status: 'active' },
+        });
+        allowedClassIds = [...new Set(enr.map((e) => e.classOfferingId))];
+      }
+    }
+
+    if (!allowedClassIds.includes(event.classOfferingId)) {
+      throw new ForbiddenException('You do not have access to this event');
+    }
+
+    return event;
   }
 
   async create(body: Partial<CalendarEvent> & Pick<CalendarEvent, 'academicYearId' | 'title' | 'date' | 'type' | 'createdById'>) {
