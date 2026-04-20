@@ -99,6 +99,19 @@ export class ChatController {
     return this.chat.postMessage(id, user.id, dto.text);
   }
 
+  @Get('messages/:id/read-receipts')
+  @ApiOperation({
+    summary: 'Get read receipts for a message',
+    description:
+      'Currently returns conservative receipts based on existing message metadata.',
+  })
+  readReceipts(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.getReadReceipts(id, user);
+  }
+
   @Get('users/search')
   @ApiOperation({
     summary: 'Search users to initiate a chat',
