@@ -31,6 +31,7 @@ import { StudentGoal } from '../modules/goals/entities/student-goal.entity';
 import { Assignment } from '../modules/assignments/entities/assignment.entity';
 import { AssignmentSubmission } from '../modules/assignments/entities/assignment-submission.entity';
 import { StudentProfile } from '../modules/student-profiles/entities/student-profile.entity';
+import { Textbook } from '../modules/textbooks/entities/textbook.entity';
 
 export const TYPEORM_ENTITIES = [
   User,
@@ -66,4 +67,5 @@ export const TYPEORM_ENTITIES = [
   Assignment,
   AssignmentSubmission,
   StudentProfile,
+  Textbook,
 ];

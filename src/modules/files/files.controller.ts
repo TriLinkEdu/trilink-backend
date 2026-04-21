@@ -54,14 +54,7 @@ export class FilesController {
     }),
   )
   async upload(@UploadedFile() file: Express.Multer.File, @CurrentUser() user: User) {
-    const uploadedFile = await this.files.uploadFile(file, user.id);
-    
-    // Automatically bind the newly uploaded image as the user's profile picture
-    if (file.mimetype.startsWith('image/')) {
-      await this.users.patchUser(user.id, { profileImageFileId: uploadedFile.id });
-    }
-    
-    return uploadedFile;
+    return this.files.uploadFile(file, user.id);
   }
 
   @Get(':id')

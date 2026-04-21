@@ -32,6 +32,22 @@ export class FilesService {
     return this.repo.save(rec);
   }
 
+  /** Create a FileRecord from pre-computed storage data (used after manual Cloudinary upload). */
+  async uploadFileRecord(data: {
+    filename: string;
+    mime: string;
+    path: string;
+    uploadedById: string;
+    storageProvider: string;
+    storageKey: string;
+    version: string | null;
+    etag: string | null;
+    sizeBytes: string | null;
+  }) {
+    const rec = this.repo.create(data);
+    return this.repo.save(rec);
+  }
+
   async get(id: string) {
     return this.repo.findOne({ where: { id } });
   }

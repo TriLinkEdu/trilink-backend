@@ -30,5 +30,6 @@ import { RESOURCE_STORAGE_PROVIDER } from './storage/resource-storage.provider';
       inject: [CloudinaryStorageProvider, S3StorageProvider],
     },
   ],
+  exports: [FilesService],
 })
 export class FilesModule {}
