@@ -28,6 +28,8 @@ import { Badge } from '../modules/gamification/entities/badge.entity';
 import { UserBadge } from '../modules/gamification/entities/user-badge.entity';
 import { LoginStreak } from '../modules/gamification/entities/login-streak.entity';
 import { StudentGoal } from '../modules/goals/entities/student-goal.entity';
+import { Assignment } from '../modules/assignments/entities/assignment.entity';
+import { AssignmentSubmission } from '../modules/assignments/entities/assignment-submission.entity';
 import { StudentProfile } from '../modules/student-profiles/entities/student-profile.entity';
 
 export const TYPEORM_ENTITIES = [
@@ -61,5 +63,7 @@ export const TYPEORM_ENTITIES = [
   UserBadge,
   LoginStreak,
   StudentGoal,
+  Assignment,
+  AssignmentSubmission,
   StudentProfile,
 ];

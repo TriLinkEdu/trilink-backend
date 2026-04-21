@@ -26,6 +26,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AiModule } from './modules/ai/ai.module';
 import { GamificationModule } from './modules/gamification/gamification.module';
 import { GoalsModule } from './modules/goals/goals.module';
+import { AssignmentsModule } from './modules/assignments/assignments.module';
 import { StudentProfilesModule } from './modules/student-profiles/student-profiles.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
@@ -73,6 +74,7 @@ import { RealtimeModule } from './modules/realtime/realtime.module';
     AiModule,
     GamificationModule,
     GoalsModule,
+    AssignmentsModule,
     StudentProfilesModule,
     ReportsModule,
     AnalyticsModule,
