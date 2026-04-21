@@ -53,6 +53,14 @@ export class FeedbackService {
     return rows.map((r) => sanitizeForViewer(r));
   }
 
+  async listMine(authorId: string) {
+    const rows = await this.repo.find({
+      where: { authorId },
+      order: { createdAt: 'DESC' },
+    });
+    return rows.map((r) => sanitizeForViewer(r));
+  }
+
   async update(id: string, body: Partial<Pick<Feedback, 'status' | 'assigneeId'>>) {
     const f = await this.repo.findOne({ where: { id } });
     if (!f) throw new NotFoundException('Not found');
