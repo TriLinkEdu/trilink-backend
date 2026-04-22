@@ -95,6 +95,19 @@ export class EnrollmentsService {
     if (c.academicYearId !== body.academicYearId) throw new BadRequestException('academicYearId mismatch with class offering');
     const dup = await this.repo.findOne({ where: { studentId: body.studentId, classOfferingId: body.classOfferingId } });
     if (dup) throw new ConflictException('Already enrolled');
+
+    // A student can only have one active enrollment per academic year.
+    const activeInYear = await this.repo.findOne({
+      where: {
+        studentId: body.studentId,
+        academicYearId: body.academicYearId,
+        status: 'active',
+      },
+    });
+    if (activeInYear) {
+      throw new ConflictException('Student already has an active class enrollment for this academic year');
+    }
+
     return this.repo.save(this.repo.create({ ...body, status: 'active' }));
   }
 

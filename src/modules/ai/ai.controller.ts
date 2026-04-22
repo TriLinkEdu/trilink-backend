@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsString, MinLength } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -40,8 +40,18 @@ export class AiController {
     summary: 'Personalized resource recommendations (stub)',
     description: 'Student (self), linked parent, teacher, or admin.',
   })
-  recommendations(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
-    return this.ai.recommendations(studentId, user);
+  recommendations(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @CurrentUser() user: User,
+    @Query('subjectId') subjectId?: string,
+    @Query('difficulty') difficulty?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.ai.recommendations(studentId, user, {
+      subjectId,
+      difficulty,
+      limit: limit ? Number(limit) : undefined,
+    });
   }
 
   @Get('students/:studentId/learning-path')
@@ -49,8 +59,12 @@ export class AiController {
     summary: 'Adaptive learning path outline (stub)',
     description: 'Same access rules as recommendations.',
   })
-  learningPath(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
-    return this.ai.learningPath(studentId, user);
+  learningPath(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @CurrentUser() user: User,
+    @Query('subjectId') subjectId?: string,
+  ) {
+    return this.ai.learningPath(studentId, user, { subjectId });
   }
 
   @Get('students/:studentId/evaluate')
@@ -65,7 +79,7 @@ export class AiController {
   @Post('feedback-assistant')
   @ApiOperation({ summary: 'Draft / tone assist for teacher communications (stub)' })
   @ApiBody({ type: FeedbackAssistantDto })
-  feedbackAssistant(@Body() body: FeedbackAssistantDto) {
-    return this.ai.feedbackAssistant(body);
+  feedbackAssistant(@Body() body: FeedbackAssistantDto, @CurrentUser() user: User) {
+    return this.ai.feedbackAssistant(body, user);
   }
 }
