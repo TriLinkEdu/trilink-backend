@@ -8,6 +8,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
   const port = config.get<number>('port') ?? 4000;
+  const host = config.get<string>('host') || process.env.HOST || '0.0.0.0';
   const prefix = config.get<string>('apiPrefix') ?? 'api';
 
   app.setGlobalPrefix(prefix, {
@@ -97,9 +98,10 @@ async function bootstrap() {
     customSiteTitle: 'TriLink API Docs',
   });
 
-  await app.listen(port);
+  await app.listen(port, host);
   console.log(`TriLink API: http://localhost:${port}/${prefix}`);
   console.log(`Swagger:    http://localhost:${port}/api-docs`);
+  console.log(`Listening on ${host}:${port}`);
 }
 
 bootstrap().catch((err) => {
