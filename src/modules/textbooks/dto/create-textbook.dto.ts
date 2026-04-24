@@ -24,4 +24,12 @@ export class CreateTextbookDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  // Swagger UI sometimes passes empty file parameters as text fields which triggers forbidNonWhitelisted.
+  // Adding them here as optional whitelisted fields.
+  @IsOptional()
+  file?: any;
+
+  @IsOptional()
+  cover?: any;
 }

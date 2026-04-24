@@ -17,9 +17,12 @@ export class CloudinaryStorageProvider implements ResourceStorageProvider {
 
   async upload(file: Express.Multer.File, options?: { folder?: string }): Promise<StoredObjectResult> {
     const folder = options?.folder || process.env.RESOURCE_STORAGE_CLOUDINARY_FOLDER || 'trilink_uploads';
+    const isImage = file.mimetype.startsWith('image/');
+    const resourceType = isImage ? 'image' : 'raw';
+    
     return new Promise<StoredObjectResult>((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { folder, resource_type: 'auto' },
+        { folder, resource_type: resourceType },
         (error, result) => {
           if (error) return reject(error);
           if (!result) return reject(new Error('Cloudinary returned no result'));

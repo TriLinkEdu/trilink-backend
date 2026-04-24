@@ -95,8 +95,10 @@ export class TextbooksController {
   @ApiQuery({ name: 'grade',   required: false, type: Number, example: 9 })
   findAll(
     @Query('subject') subject?: string,
-    @Query('grade', new ParseIntPipe({ optional: true })) grade?: number,
+    @Query('grade') gradeStr?: string,
   ) {
+    const parsedGrade = gradeStr ? parseInt(gradeStr, 10) : undefined;
+    const grade = parsedGrade !== undefined && !isNaN(parsedGrade) ? parsedGrade : undefined;
     return this.textbooks.findAll({ subject, grade });
   }
 
