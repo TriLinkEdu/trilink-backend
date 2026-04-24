@@ -30,8 +30,9 @@ import { StudentProfilesModule } from './modules/student-profiles/student-profil
 import { ReportsModule } from './modules/reports/reports.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
-import { HealthModule } from './modules/health/health.module';
 import { DigestModule } from './modules/digest/digest.module';
+import { HealthModule } from './modules/health/health.module';
+import { GradesModule } from './modules/grades/grades.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 
 @Module({
@@ -79,6 +80,7 @@ import { RealtimeModule } from './modules/realtime/realtime.module';
     IntegrationsModule,
     DigestModule,
     RealtimeModule,
+    GradesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
