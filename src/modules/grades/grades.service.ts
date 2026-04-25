@@ -311,6 +311,11 @@ export class GradesService {
       },
     };
   }
+
+  /**
+   * Student view: all released grade entries for themselves.
+   */
+  async listForStudent(studentId: string, viewer: User) {
     if (viewer.role === UserRole.STUDENT && viewer.id !== studentId) {
       throw new ForbiddenException('Cannot view another student\'s grades');
     }
@@ -334,7 +339,6 @@ export class GradesService {
 
   /**
    * Auto-create a grade entry when a student submits a platform exam.
-   * Called internally from ExamsService after submission.
    */
   async autoCreateFromExamAttempt(body: {
     classOfferingId: string;
