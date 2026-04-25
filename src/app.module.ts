@@ -35,7 +35,10 @@ import { HealthModule } from './modules/health/health.module';
 import { DigestModule } from './modules/digest/digest.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { TextbooksModule } from './modules/textbooks/textbooks.module';
-
+import { CurriculumModule } from './modules/curriculum/curriculum.module';
+import { ResourcesModule } from './modules/resources/resources.module';
+import { LearningMaterialsModule } from './modules/learning-materials/learning-materials.module';
+import { TopicsModule } from './modules/topics/topics.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [appConfig] }),
@@ -83,6 +86,10 @@ import { TextbooksModule } from './modules/textbooks/textbooks.module';
     DigestModule,
     RealtimeModule,
     TextbooksModule,
+    CurriculumModule,
+    ResourcesModule,
+    LearningMaterialsModule,
+    TopicsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
