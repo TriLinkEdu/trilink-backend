@@ -12,12 +12,12 @@ import { AttendanceMark } from './entities/attendance-mark.entity';
 import { Enrollment } from '../enrollments/entities/enrollment.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
-import { NotificationsService } from '../notifications/notifications.service';
-import { GamificationService } from '../gamification/gamification.service';
-import { User, UserRole } from '../users/entities/user.entity';
+import { Subject } from '../school-structure/entities/subject.entity';
 import { Grade } from '../school-structure/entities/grade.entity';
 import { Section } from '../school-structure/entities/section.entity';
-import { Subject } from '../school-structure/entities/subject.entity';
+import { User, UserRole } from '../users/entities/user.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { GamificationService } from '../gamification/gamification.service';
 
 @Injectable()
 export class AttendanceService {
@@ -27,9 +27,15 @@ export class AttendanceService {
     @InjectRepository(Enrollment) private readonly enrRepo: Repository<Enrollment>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
     @InjectRepository(ClassOffering) private readonly coRepo: Repository<ClassOffering>,
+    @InjectRepository(Subject) private readonly subjectRepo: Repository<Subject>,
+    @InjectRepository(Grade) private readonly gradeRepo: Repository<Grade>,
+    @InjectRepository(Section) private readonly sectionRepo: Repository<Section>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
     private readonly notifications: NotificationsService,
     private readonly gamification: GamificationService,
   ) {}
+
+  // ─── Access guards ────────────────────────────────────────────────────────
 
   async assertStudentViewer(viewer: User, studentId: string) {
     if (viewer.role === UserRole.ADMIN || viewer.role === UserRole.TEACHER) return;
@@ -51,6 +57,37 @@ export class AttendanceService {
     if (co.teacherId !== viewer.id) throw new ForbiddenException('You do not teach this class');
   }
 
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+
+  /** Enrich a ClassOffering with subject, grade, section, and teacher details. */
+  private async enrichClassOffering(co: ClassOffering) {
+    const [subject, grade, section, teacher] = await Promise.all([
+      this.subjectRepo.findOne({ where: { id: co.subjectId } }),
+      this.gradeRepo.findOne({ where: { id: co.gradeId } }),
+      this.sectionRepo.findOne({ where: { id: co.sectionId } }),
+      this.userRepo.findOne({ where: { id: co.teacherId } }),
+    ]);
+    return {
+      classOfferingId: co.id,
+      className: co.name ?? null,
+      subject: subject ? { id: subject.id, name: subject.name, code: subject.code } : null,
+      grade: grade ? { id: grade.id, name: grade.name } : null,
+      section: section ? { id: section.id, name: section.name } : null,
+      teacher: teacher
+        ? {
+            id: teacher.id,
+            firstName: teacher.firstName,
+            lastName: teacher.lastName,
+            email: teacher.email,
+            department: teacher.department ?? null,
+            officeRoom: teacher.officeRoom ?? null,
+          }
+        : null,
+    };
+  }
+
+  // ─── Session management ───────────────────────────────────────────────────
+
   async createSession(body: { classOfferingId: string; date: string; takenById: string }, viewer: User) {
     await this.assertTeacherOwnsClass(viewer, body.classOfferingId);
     const dup = await this.sessRepo.findOne({ where: { classOfferingId: body.classOfferingId, date: body.date } });
@@ -61,6 +98,38 @@ export class AttendanceService {
   async listSessions(classOfferingId: string) {
     return this.sessRepo.find({ where: { classOfferingId }, order: { date: 'DESC' } });
   }
+
+  /**
+   * List all attendance sessions for the authenticated teacher across all their classes,
+   * enriched with subject, grade, section details.
+   */
+  async listSessionsForTeacher(teacher: User) {
+    // Find all class offerings taught by this teacher
+    const offerings = await this.coRepo.find({ where: { teacherId: teacher.id } });
+    if (!offerings.length) return [];
+
+    const offeringIds = offerings.map((o) => o.id);
+    const sessions = await this.sessRepo
+      .createQueryBuilder('s')
+      .where('s.class_offering_id IN (:...ids)', { ids: offeringIds })
+      .orderBy('s.date', 'DESC')
+      .getMany();
+
+    // Build a map of enriched class offerings to avoid repeated DB calls
+    const enrichedMap = new Map<string, Awaited<ReturnType<typeof this.enrichClassOffering>>>();
+    for (const co of offerings) {
+      enrichedMap.set(co.id, await this.enrichClassOffering(co));
+    }
+
+    return sessions.map((s) => ({
+      sessionId: s.id,
+      date: s.date,
+      createdAt: s.createdAt,
+      ...enrichedMap.get(s.classOfferingId),
+    }));
+  }
+
+  // ─── Marks ────────────────────────────────────────────────────────────────
 
   async putMarks(
     sessionId: string,
@@ -107,51 +176,119 @@ export class AttendanceService {
     return this.markRepo.find({ where: { sessionId } });
   }
 
+  // ─── Reports ──────────────────────────────────────────────────────────────
+
+  /** Resolve a student's basic profile fields. */
+  private async resolveStudent(studentId: string) {
+    const student = await this.userRepo.findOne({ where: { id: studentId } });
+    if (!student) return { studentId };
+    return {
+      studentId: student.id,
+      firstName: student.firstName,
+      lastName: student.lastName,
+      email: student.email,
+      grade: student.grade ?? null,
+      section: student.section ?? null,
+    };
+  }
+
+  /**
+   * Full attendance history for a student, enriched with subject/teacher/grade/section per session.
+   */
   async reportStudent(studentId: string, viewer: User) {
     await this.assertStudentViewer(viewer, studentId);
-    const marks = await this.markRepo.find({ where: { studentId } });
+    const [studentInfo, marks] = await Promise.all([
+      this.resolveStudent(studentId),
+      this.markRepo.find({ where: { studentId } }),
+    ]);
+
     const enriched = await Promise.all(
       marks.map(async (m) => {
-        const s = await this.sessRepo.findOne({ where: { id: m.sessionId } });
+        const session = await this.sessRepo.findOne({ where: { id: m.sessionId } });
+        if (!session) return null;
+        const co = await this.coRepo.findOne({ where: { id: session.classOfferingId } });
+        if (!co) return null;
+        const classDetail = await this.enrichClassOffering(co);
         return {
+          markId: m.id,
           status: m.status,
-          sessionId: m.sessionId,
-          sessionDate: s?.date ?? null,
-          classOfferingId: s?.classOfferingId ?? null,
+          note: m.note ?? null,
+          date: session.date,
+          sessionId: session.id,
+          ...classDetail,
         };
       }),
     );
-    return { studentId, marks: enriched };
+
+    return {
+      ...studentInfo,
+      marks: enriched.filter(Boolean).sort((a, b) => (a!.date < b!.date ? 1 : -1)),
+    };
   }
 
+  /**
+   * Attendance for a student on a specific date, enriched with subject/teacher/grade/section.
+   * Used by parents and students to see what happened on a given day.
+   */
   async reportStudentByDay(studentId: string, viewer: User, date: string) {
     await this.assertStudentViewer(viewer, studentId);
-    const marks = await this.markRepo.find({ where: { studentId } });
+    const [studentInfo, marks] = await Promise.all([
+      this.resolveStudent(studentId),
+      this.markRepo.find({ where: { studentId } }),
+    ]);
+
     const enriched = await Promise.all(
       marks.map(async (m) => {
-        const s = await this.sessRepo.findOne({ where: { id: m.sessionId } });
-        return { m, s };
+        const session = await this.sessRepo.findOne({ where: { id: m.sessionId } });
+        if (!session || session.date !== date) return null;
+        const co = await this.coRepo.findOne({ where: { id: session.classOfferingId } });
+        if (!co) return null;
+        const classDetail = await this.enrichClassOffering(co);
+        return {
+          markId: m.id,
+          status: m.status,
+          note: m.note ?? null,
+          sessionId: session.id,
+          ...classDetail,
+        };
       }),
     );
-    const filtered = enriched.filter((obj) => obj.s && obj.s.date === date);
+
     return {
-      studentId,
+      ...studentInfo,
       date,
-      records: filtered.map((f) => ({
-        classOfferingId: f.s?.classOfferingId,
-        status: f.m.status,
-        note: f.m.note,
-      })),
+      records: enriched.filter(Boolean),
     };
   }
 
   async reportClass(classOfferingId: string) {
-    const sessions = await this.sessRepo.find({ where: { classOfferingId } });
-    const out = [];
-    for (const s of sessions) {
-      const marks = await this.markRepo.find({ where: { sessionId: s.id } });
-      out.push({ sessionId: s.id, date: s.date, marks });
-    }
-    return { classOfferingId, sessions: out };
+    const co = await this.coRepo.findOne({ where: { id: classOfferingId } });
+    const classDetail = co ? await this.enrichClassOffering(co) : { classOfferingId };
+
+    const sessions = await this.sessRepo.find({ where: { classOfferingId }, order: { date: 'DESC' } });
+    const out = await Promise.all(
+      sessions.map(async (s) => {
+        const rawMarks = await this.markRepo.find({ where: { sessionId: s.id } });
+        const enrichedMarks = await Promise.all(
+          rawMarks.map(async (m) => {
+            const student = await this.userRepo.findOne({ where: { id: m.studentId } });
+            return {
+              id: m.id,
+              sessionId: m.sessionId,
+              studentId: m.studentId,
+              studentFirstName: student?.firstName ?? null,
+              studentLastName: student?.lastName ?? null,
+              studentEmail: student?.email ?? null,
+              status: m.status,
+              note: m.note,
+              createdAt: m.createdAt,
+            };
+          }),
+        );
+        return { sessionId: s.id, date: s.date, marks: enrichedMarks };
+      }),
+    );
+
+    return { ...classDetail, sessions: out };
   }
 }

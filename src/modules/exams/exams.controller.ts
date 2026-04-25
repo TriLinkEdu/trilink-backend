@@ -13,7 +13,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsArray, IsNumber, IsOptional, IsString, IsUUID, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -100,10 +100,28 @@ export class ExamsController {
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @ApiOperation({
     summary: 'List all student attempts for this exam (grading queue)',
-    description: 'Includes submission status, scores, and needsManualGrading. Staff only.',
+    description: 'Paginated. Includes submission status, scores, and needsManualGrading. Staff only.',
   })
-  listAttempts(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
-    return this.exams.listAttemptsForExam(id, user);
+  listAttempts(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+    @Query('skip') skip?: string,
+    @Query('take') take?: string,
+  ) {
+    return this.exams.listAttemptsForExam(id, user, skip ? parseInt(skip, 10) : 0, take ? parseInt(take, 10) : 20);
+  }
+
+  @Get(':id/summary')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({
+    summary: 'Exam summary: questions asked + compact student results table',
+    description:
+      'Returns the list of questions that were on the exam (with answer keys for staff) ' +
+      'and a compact per-student result row (score, submitted, released, etc.). ' +
+      'Use GET /exams/:id/attempts for the full paginated grading queue.',
+  })
+  examSummary(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.exams.getExamSummary(id, user);
   }
 
   @Get(':id/results/export')

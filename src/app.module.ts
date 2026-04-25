@@ -31,8 +31,9 @@ import { StudentProfilesModule } from './modules/student-profiles/student-profil
 import { ReportsModule } from './modules/reports/reports.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
-import { HealthModule } from './modules/health/health.module';
 import { DigestModule } from './modules/digest/digest.module';
+import { HealthModule } from './modules/health/health.module';
+import { GradesModule } from './modules/grades/grades.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { TextbooksModule } from './modules/textbooks/textbooks.module';
 import { CurriculumModule } from './modules/curriculum/curriculum.module';
@@ -85,6 +86,7 @@ import { TopicsModule } from './modules/topics/topics.module';
     IntegrationsModule,
     DigestModule,
     RealtimeModule,
+    GradesModule,
     TextbooksModule,
     CurriculumModule,
     ResourcesModule,
