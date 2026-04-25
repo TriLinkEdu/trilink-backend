@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags, ApiQuery } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -81,6 +81,10 @@ export class ChatController {
   }
 
   @Get('conversations/:id/messages')
+  @ApiOperation({ summary: 'List messages in a conversation (paginated)', description: 'Member, or parent with parentVisible + linked child is member.' })
+  @ApiParam({ name: 'id', description: 'Conversation UUID' })
+  @ApiQuery({ name: 'limit', required: false, example: '50' })
+  @ApiQuery({ name: 'skip', required: false, example: '0' })
   messages(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: User,
@@ -88,6 +92,52 @@ export class ChatController {
     @Query('skip') skip?: string,
   ) {
     return this.chat.listMessages(id, user, limit ? parseInt(limit, 10) : 50, skip ? parseInt(skip, 10) : 0);
+  }
+
+  // ── Parent: view child's chat history ─────────────────────────────────────
+
+  @Get('chat/children/:studentId/conversations')
+  @Roles(UserRole.PARENT)
+  @ApiOperation({
+    summary: "Parent: list child's conversations",
+    description: 'Returns all conversations the linked child is a member of. Parent must be linked to the student.',
+  })
+  @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  @ApiResponse({
+    status: 200,
+    description: "Child's conversation list",
+    schema: { example: [{ id: 'uuid', title: 'Biology Class Chat', type: 'group', parentVisible: true, updatedAt: '2026-04-22T10:00:00.000Z' }] },
+  })
+  @ApiResponse({ status: 403, description: 'Not linked to this student' })
+  childConversations(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.listChildConversations(user.id, studentId);
+  }
+
+  @Get('chat/children/:studentId/conversations/:convId/messages')
+  @Roles(UserRole.PARENT)
+  @ApiOperation({
+    summary: "Parent: read messages in child's conversation",
+    description: 'Returns messages from a specific conversation the child is in. Parent must be linked to the student.',
+  })
+  @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  @ApiParam({ name: 'convId', description: 'Conversation UUID' })
+  @ApiQuery({ name: 'limit', required: false, example: '50' })
+  @ApiQuery({ name: 'skip', required: false, example: '0' })
+  @ApiResponse({
+    status: 200,
+    schema: { example: { conversationId: 'uuid', messages: [{ id: 'uuid', senderId: 'uuid', text: 'Hello', createdAt: '2026-04-22T10:00:00.000Z' }] } },
+  })
+  childConversationMessages(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @Param('convId', ParseUUIDPipe) convId: string,
+    @CurrentUser() user: User,
+    @Query('limit') limit?: string,
+    @Query('skip') skip?: string,
+  ) {
+    return this.chat.listChildConversationMessages(user.id, studentId, convId, limit ? parseInt(limit, 10) : 50, skip ? parseInt(skip, 10) : 0);
   }
 
   @Post('conversations/:id/messages')

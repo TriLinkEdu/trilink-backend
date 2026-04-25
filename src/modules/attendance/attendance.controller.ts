@@ -199,45 +199,53 @@ export class AttendanceController {
   @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
   @ApiOperation({
     summary: 'Full attendance history for a student (enriched)',
-    description:
-      'Returns all attendance marks for the student across all sessions, sorted by date descending. ' +
-      'The top-level object includes the student\'s name and email. ' +
-      'Each mark includes subject, grade, section, and teacher details. ' +
-      'Students can only query themselves; parents can only query their linked children.',
+    description: 'Returns all attendance marks for the student across all sessions, sorted by date descending. Students can only query themselves; parents can only query their linked children.',
   })
   @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  @ApiResponse({ status: 200, description: 'Full attendance history with student and class details' })
+  @ApiResponse({ status: 403, description: 'Not allowed to view this student' })
+  repStudent(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
+    return this.svc.reportStudent(studentId, user);
+  }
+
+  @Get('reports/attendance/student/:studentId/by-subject/:subjectId')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({
+    summary: 'Attendance for a student filtered by subject',
+    description:
+      'Returns all attendance sessions for the student in a specific subject, with per-session status and a summary (total, present, absent, late, excused, attendanceRate%). ' +
+      'Students can only view their own. Parents can only view their linked child. ' +
+      'Use GET /enrollments/mine/subjects or GET /enrollments/children/:studentId/subjects to get subject IDs.',
+  })
+  @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  @ApiParam({ name: 'subjectId', description: 'Subject UUID' })
   @ApiResponse({
     status: 200,
-    description: 'Full attendance history with student and class details',
     schema: {
       example: {
-        studentId: 'uuid',
-        firstName: 'Ali',
-        lastName: 'Hassan',
-        email: 'ali@school.edu',
-        grade: 'Grade 9',
-        section: 'A',
-        marks: [
+        studentId: 'uuid', firstName: 'Ali', lastName: 'Hassan',
+        subjectId: 'uuid', subjectName: 'Biology',
+        summary: { total: 20, present: 17, late: 1, absent: 2, excused: 0, attendanceRate: 90.0 },
+        sessions: [
           {
-            markId: 'uuid',
-            status: 'absent',
-            note: 'sick',
-            date: '2026-04-20',
-            sessionId: 'uuid',
-            classOfferingId: 'uuid',
-            className: 'Physics 9A',
-            subject: { id: 'uuid', name: 'Physics', code: 'PHY' },
+            sessionId: 'uuid', date: '2026-04-22', status: 'present', note: null,
+            classOfferingId: 'uuid', className: 'Biology 9A',
+            subject: { id: 'uuid', name: 'Biology', code: 'Bio' },
             grade: { id: 'uuid', name: 'Grade 9' },
             section: { id: 'uuid', name: 'A' },
-            teacher: { id: 'uuid', firstName: 'John', lastName: 'Smith', email: 'john@school.edu', department: null, officeRoom: null },
+            teacher: { id: 'uuid', firstName: 'Abdu', lastName: 'Isa', email: 'abdu@school.edu', department: 'Science', officeRoom: null },
           },
         ],
       },
     },
   })
   @ApiResponse({ status: 403, description: 'Not allowed to view this student' })
-  repStudent(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
-    return this.svc.reportStudent(studentId, user);
+  repStudentBySubject(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @Param('subjectId', ParseUUIDPipe) subjectId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.reportStudentBySubject(studentId, subjectId, user);
   }
 
   @Get('reports/attendance/class/:classOfferingId')
