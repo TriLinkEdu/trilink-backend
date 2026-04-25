@@ -322,6 +322,76 @@ export class ReportsService {
     return { studentId, subjects: [...bySubject.values()] };
   }
 
+  async studentMastery(studentId: string, viewer: User) {
+    await this.assertStudentViewer(viewer, studentId);
+    const u = await this.userRepo.findOne({ where: { id: studentId } });
+    if (!u || u.role !== UserRole.STUDENT) throw new NotFoundException('Student not found');
+
+    const enrollments = await this.enrRepo.find({
+      where: { studentId, status: 'active' },
+    });
+    const classIds = enrollments.map((e) => e.classOfferingId);
+    if (!classIds.length) return [];
+
+    const offerings = await this.coRepo.find({ where: { id: In(classIds) } });
+    const byClass = new Map(offerings.map((o) => [o.id, o]));
+
+    const attempts = await this.attRepo.find({
+      where: { studentId },
+      order: { releasedAt: 'DESC' },
+    });
+
+    const released = attempts.filter((a) => a.releasedAt && a.score != null);
+    const examIds = [...new Set(released.map((a) => a.examId))];
+    const exams = examIds.length
+      ? await this.examRepo.find({ where: { id: In(examIds) } })
+      : [];
+    const examMap = new Map(exams.map((e) => [e.id, e]));
+
+    const rowsByClass = new Map<string, Array<{ score: number; max: number; releasedAt: Date }>>();
+    for (const a of released) {
+      const exam = examMap.get(a.examId);
+      if (!exam?.classOfferingId || !byClass.has(exam.classOfferingId)) continue;
+      if (!rowsByClass.has(exam.classOfferingId)) rowsByClass.set(exam.classOfferingId, []);
+      rowsByClass.get(exam.classOfferingId)!.push({
+        score: Number(a.score ?? 0),
+        max: Number(exam.maxPoints ?? 100),
+        releasedAt: a.releasedAt!,
+      });
+    }
+
+    const mastery = [] as Array<{
+      studentId: string;
+      topicId: string;
+      topicName: string;
+      subjectId: string;
+      masteryLevel: number;
+      lastAssessed: string;
+    }>;
+
+    for (const [classOfferingId, rows] of rowsByClass.entries()) {
+      if (!rows.length) continue;
+      const avgPercent =
+        rows.reduce((sum, r) => sum + (r.max > 0 ? r.score / r.max : 0), 0) /
+        rows.length;
+      const last = rows
+        .map((r) => r.releasedAt)
+        .sort((a, b) => b.getTime() - a.getTime())[0];
+      const offering = byClass.get(classOfferingId)!;
+
+      mastery.push({
+        studentId,
+        topicId: classOfferingId,
+        topicName: offering.name ?? 'Course mastery',
+        subjectId: offering.subjectId,
+        masteryLevel: Math.max(0, Math.min(1, Math.round(avgPercent * 1000) / 1000)),
+        lastAssessed: last.toISOString(),
+      });
+    }
+
+    return mastery;
+  }
+
   /** Generate comprehensive report for a student for weekly, monthly, or custom ranges. */
   async studentReport(
     studentId: string,

@@ -28,7 +28,12 @@ import { Badge } from '../modules/gamification/entities/badge.entity';
 import { UserBadge } from '../modules/gamification/entities/user-badge.entity';
 import { LoginStreak } from '../modules/gamification/entities/login-streak.entity';
 import { StudentGoal } from '../modules/goals/entities/student-goal.entity';
+import { Assignment } from '../modules/assignments/entities/assignment.entity';
+import { AssignmentSubmission } from '../modules/assignments/entities/assignment-submission.entity';
 import { StudentProfile } from '../modules/student-profiles/entities/student-profile.entity';
+import { Textbook } from '../modules/textbooks/entities/textbook.entity';
+import { LearningMaterial } from '../modules/learning-materials/entities/learning-material.entity';
+import { Topic } from '../modules/topics/entities/topic.entity';
 import { GradeEntry } from '../modules/grades/entities/grade-entry.entity';
 
 export const TYPEORM_ENTITIES = [
@@ -62,6 +67,11 @@ export const TYPEORM_ENTITIES = [
   UserBadge,
   LoginStreak,
   StudentGoal,
+  Assignment,
+  AssignmentSubmission,
   StudentProfile,
+  Textbook,
+  LearningMaterial,
+  Topic,
   GradeEntry,
 ];

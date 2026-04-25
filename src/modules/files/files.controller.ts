@@ -4,6 +4,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -21,7 +22,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { FilesService } from './files.service';
 import { UsersService } from '../users/users.service';
-import { randomUUID } from 'crypto';
+import { FileAccessQueryDto } from './dto/file-access-query.dto';
+import { FileAccessResponseDto } from './dto/file-access-response.dto';
 
 import { Public } from '../../common/decorators/public.decorator';
 
@@ -52,20 +54,24 @@ export class FilesController {
     }),
   )
   async upload(@UploadedFile() file: Express.Multer.File, @CurrentUser() user: User) {
-    const uploadedFile = await this.files.uploadFile(file, user.id);
-    
-    // Automatically bind the newly uploaded image as the user's profile picture
-    if (file.mimetype.startsWith('image/')) {
-      await this.users.patchUser(user.id, { profileImageFileId: uploadedFile.id });
-    }
-    
-    return uploadedFile;
+    return this.files.uploadFile(file, user.id);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'File metadata' })
   meta(@Param('id', ParseUUIDPipe) id: string) {
     return this.files.get(id);
+  }
+
+  @Get(':id/access')
+  @ApiOperation({ summary: 'Get file access metadata and URL for app viewer/cache' })
+  async access(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: FileAccessQueryDto,
+  ): Promise<FileAccessResponseDto> {
+    return this.files.getAccessMetadata(id, {
+      expiresInSeconds: query.expiresInSeconds,
+    });
   }
 
   @Public()
