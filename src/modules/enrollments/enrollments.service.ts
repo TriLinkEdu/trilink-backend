@@ -87,6 +87,43 @@ export class EnrollmentsService {
     return this.buildEnrollmentDetails(studentId);
   }
 
+  private async buildSubjectList(studentId: string) {
+    const rows = await this.repo.find({ where: { studentId, status: 'active' }, order: { createdAt: 'DESC' } });
+    const results = await Promise.all(
+      rows.map(async (e) => {
+        const co = await this.classRepo.findOne({ where: { id: e.classOfferingId } });
+        if (!co) return null;
+        const [grade, section, subject, teacher] = await Promise.all([
+          this.gradeRepo.findOne({ where: { id: co.gradeId } }),
+          this.sectionRepo.findOne({ where: { id: co.sectionId } }),
+          this.subjectRepo.findOne({ where: { id: co.subjectId } }),
+          this.userRepo.findOne({ where: { id: co.teacherId } }),
+        ]);
+        return {
+          subjectId: subject?.id ?? co.subjectId,
+          subjectName: subject?.name ?? null,
+          subjectCode: subject?.code ?? null,
+          classOfferingId: co.id,
+          academicYearId: e.academicYearId,
+          gradeName: grade?.name ?? null,
+          sectionName: section?.name ?? null,
+          teacher: teacher ? { id: teacher.id, firstName: teacher.firstName, lastName: teacher.lastName, email: teacher.email } : null,
+        };
+      }),
+    );
+    return results.filter((r) => r !== null);
+  }
+
+  async listSubjectsForStudent(studentId: string) {
+    return this.buildSubjectList(studentId);
+  }
+
+  async listSubjectsForParentChild(parentId: string, studentId: string) {
+    const link = await this.psRepo.findOne({ where: { parentId, studentId } });
+    if (!link) throw new ForbiddenException('Not linked to this student');
+    return this.buildSubjectList(studentId);
+  }
+
   async create(body: { studentId: string; classOfferingId: string; academicYearId: string }) {
     const u = await this.userRepo.findOne({ where: { id: body.studentId } });
     if (!u || u.role !== UserRole.STUDENT) throw new BadRequestException('studentId must be a student');

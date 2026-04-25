@@ -266,6 +266,53 @@ export class GradesService {
   }
 
   /**
+   * Student/parent view: released grades for a student filtered by subject.
+   * Resolves classOfferingId → subjectId to filter entries.
+   */
+  async listForStudentBySubject(studentId: string, subjectId: string, viewer: User) {
+    if (viewer.role === UserRole.STUDENT && viewer.id !== studentId) {
+      throw new ForbiddenException('Cannot view another student\'s grades');
+    }
+    if (viewer.role === UserRole.PARENT) {
+      const link = await this.psRepo.findOne({ where: { parentId: viewer.id, studentId } });
+      if (!link) throw new ForbiddenException('Not linked to this student');
+    }
+
+    const allEntries = await this.repo.find({ where: { studentId }, order: { createdAt: 'DESC' } });
+    const visible = (viewer.role === UserRole.ADMIN || viewer.role === UserRole.TEACHER)
+      ? allEntries
+      : allEntries.filter((e) => e.releasedAt != null);
+
+    // Filter by subject — resolve classOfferingId → subjectId
+    const filtered: typeof visible = [];
+    for (const e of visible) {
+      const co = await this.coRepo.findOne({ where: { id: e.classOfferingId } });
+      if (co?.subjectId === subjectId) filtered.push(e);
+    }
+
+    const enriched = await Promise.all(filtered.map((e) => this.enrichEntry(e)));
+    const student = await this.userRepo.findOne({ where: { id: studentId } });
+    const subject = await this.subjectRepo.findOne({ where: { id: subjectId } });
+
+    return {
+      studentId,
+      studentName: student ? `${student.firstName} ${student.lastName}` : null,
+      subjectId,
+      subjectName: subject?.name ?? null,
+      entries: enriched,
+      summary: {
+        total: enriched.length,
+        withScore: enriched.filter((e) => e.score != null).length,
+        averagePercent: (() => {
+          const scored = enriched.filter((e) => e.score != null);
+          if (!scored.length) return null;
+          return Math.round(scored.reduce((s, e) => s + (e.score! / e.maxScore) * 100, 0) / scored.length * 10) / 10;
+        })(),
+      },
+    };
+  }
+
+  /**
    * Student view: all released grade entries for themselves.
    */
   async listForStudent(studentId: string, viewer: User) {
@@ -292,7 +339,6 @@ export class GradesService {
 
   /**
    * Auto-create a grade entry when a student submits a platform exam.
-   * Called internally from ExamsService after submission.
    */
   async autoCreateFromExamAttempt(body: {
     classOfferingId: string;

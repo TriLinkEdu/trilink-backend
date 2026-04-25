@@ -163,6 +163,31 @@ export class ChatService {
     return this.convRepo.find({ order: { updatedAt: 'DESC' }, take, skip });
   }
 
+  /** Parent: list all conversations the linked child is a member of */
+  async listChildConversations(parentId: string, studentId: string) {
+    const link = await this.psRepo.findOne({ where: { parentId, studentId } });
+    if (!link) throw new ForbiddenException('Not linked to this student');
+    const mems = await this.memRepo.find({ where: { userId: studentId } });
+    if (!mems.length) return [];
+    const convIds = mems.map((m) => m.conversationId);
+    return this.convRepo.find({ where: { id: In(convIds) }, order: { updatedAt: 'DESC' } });
+  }
+
+  /** Parent: read messages in a conversation the linked child is part of */
+  async listChildConversationMessages(parentId: string, studentId: string, conversationId: string, limit = 50, skip = 0) {
+    const link = await this.psRepo.findOne({ where: { parentId, studentId } });
+    if (!link) throw new ForbiddenException('Not linked to this student');
+    const mem = await this.memRepo.findOne({ where: { conversationId, userId: studentId } });
+    if (!mem) throw new ForbiddenException('Child is not a member of this conversation');
+    const messages = await this.msgRepo.find({
+      where: { conversationId },
+      order: { createdAt: 'DESC' },
+      take: limit,
+      skip,
+    });
+    return { conversationId, messages };
+  }
+
   /** Initiate a direct conversation between two users */
   async initiateDirectChat(initiatorId: string, targetUserId: string, initiatorRole: UserRole) {
     // Check if conversation already exists between these two users

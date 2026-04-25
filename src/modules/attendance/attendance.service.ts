@@ -261,6 +261,85 @@ export class AttendanceService {
     };
   }
 
+  /**
+   * Attendance for a student grouped by subject.
+   * Returns all sessions for that subject with per-session mark status.
+   * Access: student (self), parent (linked child), teacher, admin.
+   */
+  async reportStudentBySubject(studentId: string, subjectId: string, viewer: User) {
+    await this.assertStudentViewer(viewer, studentId);
+
+    const [studentInfo, subject] = await Promise.all([
+      this.resolveStudent(studentId),
+      this.subjectRepo.findOne({ where: { id: subjectId } }),
+    ]);
+
+    const empty = {
+      ...studentInfo,
+      subjectId,
+      subjectName: subject?.name ?? null,
+      sessions: [],
+      summary: { total: 0, present: 0, late: 0, absent: 0, excused: 0, attendanceRate: null as number | null },
+    };
+
+    const enrollments = await this.enrRepo.find({ where: { studentId } });
+    if (!enrollments.length) return empty;
+
+    // Find class offerings for this subject the student is enrolled in
+    const matchingOfferings: ClassOffering[] = [];
+    for (const e of enrollments) {
+      const co = await this.coRepo.findOne({ where: { id: e.classOfferingId, subjectId } });
+      if (co) matchingOfferings.push(co);
+    }
+    if (!matchingOfferings.length) return empty;
+
+    // Collect all sessions + marks across matching offerings
+    const sessionRows: Array<{
+      sessionId: string;
+      date: string;
+      status: string | null;
+      note: string | null;
+      classOfferingId: string;
+      className: string | null;
+      subject: { id: string; name: string; code: string | null } | null;
+      grade: { id: string; name: string } | null;
+      section: { id: string; name: string } | null;
+      teacher: { id: string; firstName: string; lastName: string; email: string; department: string | null; officeRoom: string | null } | null;
+    }> = [];
+
+    for (const co of matchingOfferings) {
+      const sessions = await this.sessRepo.find({ where: { classOfferingId: co.id }, order: { date: 'DESC' } });
+      const classDetail = await this.enrichClassOffering(co);
+      for (const session of sessions) {
+        const mark = await this.markRepo.findOne({ where: { sessionId: session.id, studentId } });
+        sessionRows.push({
+          sessionId: session.id,
+          date: session.date,
+          status: mark?.status ?? null,
+          note: mark?.note ?? null,
+          ...classDetail,
+        });
+      }
+    }
+
+    sessionRows.sort((a, b) => (a.date < b.date ? 1 : -1));
+
+    const total = sessionRows.length;
+    const present = sessionRows.filter((s) => s.status === 'present').length;
+    const late = sessionRows.filter((s) => s.status === 'late').length;
+    const absent = sessionRows.filter((s) => s.status === 'absent').length;
+    const excused = sessionRows.filter((s) => s.status === 'excused').length;
+    const attendanceRate = total > 0 ? Math.round(((present + late) / total) * 1000) / 10 : null;
+
+    return {
+      ...studentInfo,
+      subjectId,
+      subjectName: subject?.name ?? null,
+      summary: { total, present, late, absent, excused, attendanceRate },
+      sessions: sessionRows,
+    };
+  }
+
   async reportClass(classOfferingId: string) {
     const co = await this.coRepo.findOne({ where: { id: classOfferingId } });
     const classDetail = co ? await this.enrichClassOffering(co) : { classOfferingId };
