@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User, UserRole } from './entities/user.entity';
+import { FileRecord } from '../files/entities/file-record.entity';
 import { RegisterByAdminDto } from './dto/register-by-admin.dto';
 import { ParentStudentsService } from '../parent-students/parent-students.service';
 
@@ -17,6 +18,8 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    @InjectRepository(FileRecord)
+    private readonly fileRepo: Repository<FileRecord>,
     private readonly parentStudents: ParentStudentsService,
   ) {}
 
@@ -116,6 +119,18 @@ export class UsersService {
     return rest;
   }
 
+  async toPublicWithImage(u: User) {
+    const { passwordHash: _p, ...rest } = u;
+    let profileImagePath: string | null = null;
+    if (u.profileImageFileId) {
+      const file = await this.fileRepo.findOne({ where: { id: u.profileImageFileId } });
+      if (file) {
+        profileImagePath = file.path;
+      }
+    }
+    return { ...rest, profileImagePath };
+  }
+
   async listUsers(filters: { role?: UserRole; q?: string }): Promise<Partial<User>[]> {
     const qb = this.userRepo.createQueryBuilder('u').orderBy('u.createdAt', 'DESC');
     if (filters.role) qb.andWhere('u.role = :role', { role: filters.role });
@@ -195,6 +210,6 @@ export class UsersService {
     }
 
     const saved = await this.userRepo.save(u);
-    return this.toPublic(saved) as User;
+    return saved;
   }
 }

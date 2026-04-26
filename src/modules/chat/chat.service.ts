@@ -136,10 +136,29 @@ export class ChatService {
       qb.where('(u.firstName ILIKE :term OR u.lastName ILIKE :term OR u.subject ILIKE :term)', { term: `%${searchTerm}%` });
     }
     
-    // Admin sees everyone, others see admins + potentially related users 
-    // (For simplicity, we constrain non-admins to search admins/teachers unless we need deeper relationship graphs)
-    // We can allow all roles to be searched if queried, but limit the returned payload severely.
-    // The prompt says "no need to fetch all users", we limit by take(20).
+    // Grade-based filtering for students
+    if (user.role === UserRole.STUDENT) {
+      // Students can only see:
+      // 1. Teachers (all)
+      // 2. Students in the same grade
+      qb.andWhere(
+        '(u.role = :teacherRole OR (u.role = :studentRole AND u.grade = :userGrade))',
+        { 
+          teacherRole: UserRole.TEACHER,
+          studentRole: UserRole.STUDENT,
+          userGrade: user.grade 
+        }
+      );
+    }
+    
+    // Teachers see everyone
+    // Admin sees everyone
+    // Parents see teachers and admins
+    if (user.role === UserRole.PARENT) {
+      qb.andWhere('u.role IN (:...allowedRoles)', { 
+        allowedRoles: [UserRole.TEACHER, UserRole.ADMIN] 
+      });
+    }
     
     qb.select([
       'u.id',
@@ -154,6 +173,7 @@ export class ChatService {
     ]);
     
     qb.andWhere('u.id != :myId', { myId: user.id });
+    qb.orderBy('u.role', 'ASC').addOrderBy('u.firstName', 'ASC');
     qb.take(20);
     
     return qb.getMany();

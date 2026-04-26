@@ -11,6 +11,7 @@ export type ClassOfferingWithLabels = ClassOffering & {
   gradeName: string | null;
   sectionName: string | null;
   subjectName: string | null;
+  teacherName: string | null;
   displayName: string;
 };
 
@@ -42,21 +43,25 @@ export class ClassOfferingsService {
     const gradeIds = [...new Set(offerings.map((o) => o.gradeId))];
     const sectionIds = [...new Set(offerings.map((o) => o.sectionId))];
     const subjectIds = [...new Set(offerings.map((o) => o.subjectId))];
-    const [grades, sections, subjects] = await Promise.all([
+    const teacherIds = [...new Set(offerings.map((o) => o.teacherId))];
+    const [grades, sections, subjects, teachers] = await Promise.all([
       this.gradeRepo.findBy({ id: In(gradeIds) }),
       this.sectionRepo.findBy({ id: In(sectionIds) }),
       this.subjectRepo.findBy({ id: In(subjectIds) }),
+      this.userRepo.findBy({ id: In(teacherIds) }),
     ]);
     const gMap = new Map(grades.map((g) => [g.id, g.name]));
     const secMap = new Map(sections.map((s) => [s.id, s.name]));
     const subMap = new Map(subjects.map((s) => [s.id, s.name]));
+    const teacherMap = new Map(teachers.map((t) => [t.id, `${t.firstName} ${t.lastName}`.trim() || t.email]));
 
     return offerings.map((co) => {
       const gradeName = gMap.get(co.gradeId) ?? null;
       const sectionName = secMap.get(co.sectionId) ?? null;
       const subjectName = subMap.get(co.subjectId) ?? null;
+      const teacherName = teacherMap.get(co.teacherId) ?? null;
       const displayName = this.computeDisplayName(co, gradeName, sectionName, subjectName);
-      return { ...co, gradeName, sectionName, subjectName, displayName };
+      return { ...co, gradeName, sectionName, subjectName, teacherName, displayName };
     });
   }
 

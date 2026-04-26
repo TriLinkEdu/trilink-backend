@@ -118,8 +118,8 @@ export class AuthController {
   })
   @ApiResponse({ status: 200, description: 'Public user fields' })
   @ApiResponse({ status: 401, description: 'Missing or invalid JWT', type: ErrorResponseDto })
-  me(@CurrentUser() user: User) {
-    return this.usersService.toPublic(user);
+  async me(@CurrentUser() user: User) {
+    return this.usersService.toPublicWithImage(user);
   }
 
   @Post('change-password')
