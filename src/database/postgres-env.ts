@@ -21,6 +21,10 @@ export function normalizePostgresUrl(url: string): string {
   try {
     const u = new URL(trimmed);
     u.searchParams.delete('channel_binding');
+    // Ensure uselibpqcompat is set for Neon SSL compatibility
+    if (u.searchParams.has('sslmode')) {
+      u.searchParams.set('uselibpqcompat', 'true');
+    }
     let s = u.toString();
     if (s.endsWith('?') || s.endsWith('&')) s = s.slice(0, -1);
     return s;
