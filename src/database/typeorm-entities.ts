@@ -30,6 +30,8 @@ import { LoginStreak } from '../modules/gamification/entities/login-streak.entit
 import { StudentGoal } from '../modules/goals/entities/student-goal.entity';
 import { StudentProfile } from '../modules/student-profiles/entities/student-profile.entity';
 import { GradeEntry } from '../modules/grades/entities/grade-entry.entity';
+import { Assignment } from '../modules/assignments/entities/assignment.entity';
+import { AssignmentSubmission } from '../modules/assignments/entities/assignment-submission.entity';
 
 export const TYPEORM_ENTITIES = [
   User,
@@ -64,4 +66,6 @@ export const TYPEORM_ENTITIES = [
   StudentGoal,
   StudentProfile,
   GradeEntry,
+  Assignment,
+  AssignmentSubmission,
 ];

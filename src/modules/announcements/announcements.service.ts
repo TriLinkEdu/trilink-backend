@@ -52,11 +52,24 @@ export class AnnouncementsService {
     const userRepo = this.repo.manager.getRepository(User);
     const targetUserIds: string[] = [];
 
-    if (a.audience === 'class' && a.classOfferingId) {
+    if (a.audience === 'all') {
+      // Notify all students and parents
+      const students = await userRepo.find({ where: { role: UserRole.STUDENT } });
+      const parents = await userRepo.find({ where: { role: UserRole.PARENT } });
+      targetUserIds.push(...students.map(s => s.id), ...parents.map(p => p.id));
+    } else if (a.audience === 'students') {
+      const students = await userRepo.find({ where: { role: UserRole.STUDENT } });
+      targetUserIds.push(...students.map(s => s.id));
+    } else if (a.audience === 'parents') {
+      const parents = await userRepo.find({ where: { role: UserRole.PARENT } });
+      targetUserIds.push(...parents.map(p => p.id));
+    } else if (a.audience === 'teachers') {
+      const teachers = await userRepo.find({ where: { role: UserRole.TEACHER } });
+      targetUserIds.push(...teachers.map(t => t.id));
+    } else if (a.audience === 'class' && a.classOfferingId) {
       const enrs = await this.enrRepo.find({ where: { classOfferingId: a.classOfferingId, status: 'active' } });
       const studentIds = enrs.map(e => e.studentId);
       targetUserIds.push(...studentIds);
-
       if (studentIds.length > 0) {
         const links = await this.psRepo.createQueryBuilder('ps').where('ps.studentId IN (:...ids)', { ids: studentIds }).getMany();
         targetUserIds.push(...links.map(l => l.parentId));
@@ -65,10 +78,9 @@ export class AnnouncementsService {
       const students = await userRepo.find({ where: { role: UserRole.STUDENT, grade: a.targetGrade } });
       const studentIds = students.map(s => s.id);
       targetUserIds.push(...studentIds);
-
       if (studentIds.length > 0) {
-         const links = await this.psRepo.createQueryBuilder('ps').where('ps.studentId IN (:...ids)', { ids: studentIds }).getMany();
-         targetUserIds.push(...links.map(l => l.parentId));
+        const links = await this.psRepo.createQueryBuilder('ps').where('ps.studentId IN (:...ids)', { ids: studentIds }).getMany();
+        targetUserIds.push(...links.map(l => l.parentId));
       }
     }
 
