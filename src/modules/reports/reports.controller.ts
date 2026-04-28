@@ -105,6 +105,20 @@ export class ReportsController {
     return this.reports.studentReport(studentId, user, normalizedType as 'weekly' | 'monthly' | 'custom', startDate, endDate);
   }
 
+  @Get('students/:studentId/mastery')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({
+    summary: 'Student mastery snapshot by enrolled course',
+    description:
+      'Returns coarse mastery levels derived from released exam performance per active class offering.',
+  })
+  studentMastery(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.reports.studentMastery(studentId, user);
+  }
+
   @Get('students/:studentId/teachers')
   @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
   @ApiOperation({
