@@ -2,7 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Feedback, FeedbackType, FeedbackSenderRole } from './entities/feedback.entity';
-import { UserRole } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
+import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 
 function sanitizeForViewer(row: Feedback): Omit<Feedback, 'authorId'> & { authorId: string | null } {
   const { authorId, ...rest } = row;
@@ -14,20 +15,51 @@ function sanitizeForViewer(row: Feedback): Omit<Feedback, 'authorId'> & { author
 
 function mapUserRoleToSenderRole(role: UserRole): FeedbackSenderRole | null {
   switch (role) {
-    case UserRole.STUDENT:
-      return FeedbackSenderRole.STUDENT;
-    case UserRole.PARENT:
-      return FeedbackSenderRole.PARENT;
-    case UserRole.TEACHER:
-      return FeedbackSenderRole.TEACHER;
-    default:
-      return null;
+    case UserRole.STUDENT: return FeedbackSenderRole.STUDENT;
+    case UserRole.PARENT: return FeedbackSenderRole.PARENT;
+    case UserRole.TEACHER: return FeedbackSenderRole.TEACHER;
+    default: return null;
   }
 }
 
 @Injectable()
 export class FeedbackService {
-  constructor(@InjectRepository(Feedback) private readonly repo: Repository<Feedback>) {}
+  constructor(
+    @InjectRepository(Feedback) private readonly repo: Repository<Feedback>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+    @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
+  ) {}
+
+  /** Enrich a feedback row with sender name and (for parents) child name. */
+  private async enrichSender(row: Feedback) {
+    const base = sanitizeForViewer(row);
+    if (row.isAnonymous || !row.authorId) {
+      return { ...base, sender: null };
+    }
+    const author = await this.userRepo.findOne({ where: { id: row.authorId } });
+    const sender = author
+      ? {
+          id: author.id,
+          firstName: author.firstName,
+          lastName: author.lastName,
+          email: author.email,
+          role: author.role,
+        }
+      : null;
+
+    // If sender is a parent, also include their linked children's names
+    let children: Array<{ studentId: string; firstName: string; lastName: string }> | null = null;
+    if (author?.role === UserRole.PARENT) {
+      const links = await this.psRepo.find({ where: { parentId: author.id } });
+      if (links.length) {
+        const studentIds = links.map(l => l.studentId);
+        const students = await this.userRepo.findByIds(studentIds);
+        children = students.map(s => ({ studentId: s.id, firstName: s.firstName, lastName: s.lastName }));
+      }
+    }
+
+    return { ...base, sender, children };
+  }
 
   create(body: {
     authorId: string | null;
@@ -69,14 +101,14 @@ export class FeedbackService {
   }
 
   /**
-   * Teacher: list feedback directed at them (category = 'teacher' and teacherId = their ID).
+   * Teacher: list feedback directed at them, enriched with sender name and child info.
    */
   async listForTeacher(teacherId: string) {
     const rows = await this.repo.find({
       where: { teacherId, category: FeedbackType.TEACHER },
       order: { createdAt: 'DESC' },
     });
-    return rows.map((r) => sanitizeForViewer(r));
+    return Promise.all(rows.map(r => this.enrichSender(r)));
   }
 
   /**

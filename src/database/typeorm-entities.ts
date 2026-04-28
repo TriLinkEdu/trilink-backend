@@ -35,6 +35,8 @@ import { Textbook } from '../modules/textbooks/entities/textbook.entity';
 import { LearningMaterial } from '../modules/learning-materials/entities/learning-material.entity';
 import { Topic } from '../modules/topics/entities/topic.entity';
 import { GradeEntry } from '../modules/grades/entities/grade-entry.entity';
+import { Assignment } from '../modules/assignments/entities/assignment.entity';
+import { AssignmentSubmission } from '../modules/assignments/entities/assignment-submission.entity';
 
 export const TYPEORM_ENTITIES = [
   User,
@@ -74,4 +76,6 @@ export const TYPEORM_ENTITIES = [
   LearningMaterial,
   Topic,
   GradeEntry,
+  Assignment,
+  AssignmentSubmission,
 ];

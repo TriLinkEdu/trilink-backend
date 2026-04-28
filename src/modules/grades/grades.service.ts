@@ -338,6 +338,36 @@ export class GradesService {
   }
 
   /**
+   * Auto-create a grade entry from an assignment submission.
+   */
+  async autoCreateFromAssignment(body: {
+    classOfferingId: string;
+    studentId: string;
+    teacherId: string;
+    title: string;
+    submissionId: string;
+    score: number;
+    maxScore: number;
+  }) {
+    const existing = await this.repo.findOne({ where: { classOfferingId: body.classOfferingId, studentId: body.studentId, title: body.title } });
+    if (existing) {
+      existing.score = body.score;
+      existing.maxScore = body.maxScore;
+      return this.repo.save(existing);
+    }
+    return this.repo.save(this.repo.create({
+      classOfferingId: body.classOfferingId,
+      studentId: body.studentId,
+      teacherId: body.teacherId,
+      title: body.title,
+      type: GradeEntryType.ASSIGNMENT,
+      score: body.score,
+      maxScore: body.maxScore,
+      releasedAt: new Date(),
+    }));
+  }
+
+  /**
    * Auto-create a grade entry when a student submits a platform exam.
    */
   async autoCreateFromExamAttempt(body: {

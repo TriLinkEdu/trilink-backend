@@ -34,6 +34,7 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { DigestModule } from './modules/digest/digest.module';
 import { HealthModule } from './modules/health/health.module';
 import { GradesModule } from './modules/grades/grades.module';
+import { AssignmentsModule } from './modules/assignments/assignments.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { TextbooksModule } from './modules/textbooks/textbooks.module';
 import { CurriculumModule } from './modules/curriculum/curriculum.module';
@@ -87,11 +88,7 @@ import { TopicsModule } from './modules/topics/topics.module';
     DigestModule,
     RealtimeModule,
     GradesModule,
-    TextbooksModule,
-    CurriculumModule,
-    ResourcesModule,
-    LearningMaterialsModule,
-    TopicsModule,
+    AssignmentsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

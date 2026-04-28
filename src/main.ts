@@ -83,6 +83,7 @@ async function bootstrap() {
     .addTag('Reports', 'Performance, weekly parent summary, period comparison')
     .addTag('Analytics', 'Admin school-wide metrics')
     .addTag('Grades', 'Teacher-managed grade entries: assignments, quizzes, exams (auto + manual)')
+    .addTag('Assignments', 'Teacher creates assignments; students submit files or text; teacher grades and releases')
     .addTag('Integrations', 'External services and sync hints')
     .addTag('Health', 'Liveness (no /api prefix)')
     .build();
