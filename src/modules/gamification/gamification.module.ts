@@ -8,6 +8,11 @@ import { User } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 import { AttendanceSession } from '../attendance/entities/attendance-session.entity';
 import { AttendanceMark } from '../attendance/entities/attendance-mark.entity';
+import { Enrollment } from '../enrollments/entities/enrollment.entity';
+import { Subject } from '../school-structure/entities/subject.entity';
+import { Question } from '../exams/entities/question.entity';
+import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
+import { Topic } from '../topics/entities/topic.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { GamificationService } from './gamification.service';
 import { GamificationController } from './gamification.controller';
@@ -23,6 +28,11 @@ import { GamificationController } from './gamification.controller';
       AttendanceSession,
       AttendanceMark,
       LoginStreak,
+      Enrollment,
+      Subject,
+      Question,
+      ClassOffering,
+      Topic,
     ]),
     NotificationsModule,
   ],

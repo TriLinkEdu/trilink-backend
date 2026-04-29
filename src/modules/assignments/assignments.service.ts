@@ -22,7 +22,9 @@ export class AssignmentsService {
   private statusFor(assignment: Assignment, submission?: AssignmentSubmission): 'pending' | 'submitted' | 'graded' | 'overdue' {
     if (submission?.score != null) return 'graded';
     if (submission) return 'submitted';
-    if (assignment.dueDate.getTime() < Date.now()) return 'overdue';
+    if (assignment.dueDate && assignment.dueDate.getTime() < Date.now()) {
+      return 'overdue';
+    }
     return 'pending';
   }
 
@@ -30,7 +32,7 @@ export class AssignmentsService {
     return {
       id: assignment.id,
       title: assignment.title,
-      subject: assignment.subject,
+      subject: assignment.subject || 'General',
       description: assignment.description,
       dueDate: assignment.dueDate,
       status: this.statusFor(assignment, submission),
@@ -48,7 +50,10 @@ export class AssignmentsService {
     }
 
     const classIds = await this.allowedClassIdsForStudent(user.id);
-    const qb = this.assignmentRepo.createQueryBuilder('a').orderBy('a.due_date', 'ASC');
+    const qb = this.assignmentRepo
+      .createQueryBuilder('a')
+      .orderBy('a.due_date', 'ASC', 'NULLS LAST')
+      .addOrderBy('a.created_at', 'DESC');
     if (classIds.length === 0) {
       qb.where('a.class_offering_id IS NULL');
     } else {
