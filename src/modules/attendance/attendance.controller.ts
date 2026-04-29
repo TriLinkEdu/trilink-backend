@@ -22,7 +22,7 @@ import { AttendanceService } from './attendance.service';
 
 class MarkRow {
   @ApiProperty({ description: 'Student UUID' }) @IsUUID() studentId: string;
-  @ApiProperty({ example: 'present', description: 'present | absent | excused | late' }) @IsString() status: string;
+  @ApiProperty({ example: 'present', description: 'present | absent | excused' }) @IsString() status: string;
   @ApiPropertyOptional({ description: 'Optional note for this mark' }) @IsOptional() @IsString() note?: string;
 }
 
@@ -213,7 +213,7 @@ export class AttendanceController {
   @ApiOperation({
     summary: 'Attendance for a student filtered by subject',
     description:
-      'Returns all attendance sessions for the student in a specific subject, with per-session status and a summary (total, present, absent, late, excused, attendanceRate%). ' +
+      'Returns all attendance sessions for the student in a specific subject, with per-session status and a summary (total, present, absent, excused, attendanceRate%). ' +
       'Students can only view their own. Parents can only view their linked child. ' +
       'Use GET /enrollments/mine/subjects or GET /enrollments/children/:studentId/subjects to get subject IDs.',
   })
@@ -225,7 +225,7 @@ export class AttendanceController {
       example: {
         studentId: 'uuid', firstName: 'Ali', lastName: 'Hassan',
         subjectId: 'uuid', subjectName: 'Biology',
-        summary: { total: 20, present: 17, late: 1, absent: 2, excused: 0, attendanceRate: 90.0 },
+        summary: { total: 20, present: 17, absent: 2, excused: 1, attendanceRate: 90.0 },
         sessions: [
           {
             sessionId: 'uuid', date: '2026-04-22', status: 'present', note: null,

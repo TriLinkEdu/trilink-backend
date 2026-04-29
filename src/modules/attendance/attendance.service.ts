@@ -141,8 +141,10 @@ export class AttendanceService {
     await this.assertTeacherOwnsClass(viewer, session.classOfferingId);
     const enrolled = await this.enrRepo.find({ where: { classOfferingId: session.classOfferingId, status: 'active' } });
     const ids = new Set(enrolled.map((e) => e.studentId));
+    const validStatuses = new Set(['present', 'absent', 'excused']);
     for (const m of marks) {
       if (!ids.has(m.studentId)) throw new BadRequestException(`Student ${m.studentId} not in class`);
+      if (!validStatuses.has(m.status)) throw new BadRequestException(`Invalid status "${m.status}". Allowed: present, absent, excused`);
       const existing = await this.markRepo.findOne({ where: { sessionId, studentId: m.studentId } });
       if (existing) {
         existing.status = m.status;
@@ -279,7 +281,7 @@ export class AttendanceService {
       subjectId,
       subjectName: subject?.name ?? null,
       sessions: [],
-      summary: { total: 0, present: 0, late: 0, absent: 0, excused: 0, attendanceRate: null as number | null },
+      summary: { total: 0, present: 0, absent: 0, excused: 0, attendanceRate: null as number | null },
     };
 
     const enrollments = await this.enrRepo.find({ where: { studentId } });
@@ -326,16 +328,15 @@ export class AttendanceService {
 
     const total = sessionRows.length;
     const present = sessionRows.filter((s) => s.status === 'present').length;
-    const late = sessionRows.filter((s) => s.status === 'late').length;
     const absent = sessionRows.filter((s) => s.status === 'absent').length;
     const excused = sessionRows.filter((s) => s.status === 'excused').length;
-    const attendanceRate = total > 0 ? Math.round(((present + late) / total) * 1000) / 10 : null;
+    const attendanceRate = total > 0 ? Math.round((present / total) * 1000) / 10 : null;
 
     return {
       ...studentInfo,
       subjectId,
       subjectName: subject?.name ?? null,
-      summary: { total, present, late, absent, excused, attendanceRate },
+      summary: { total, present, absent, excused, attendanceRate },
       sessions: sessionRows,
     };
   }

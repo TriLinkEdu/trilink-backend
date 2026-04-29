@@ -31,14 +31,14 @@ class MsgDto {
 export class ChatController {
   constructor(private readonly chat: ChatService) {}
 
-  @Get('chat/ws-info')
-  @ApiOperation({ summary: 'WebSocket URL hint (use same origin / socket.io client)' })
-  wsInfo() {
-    return {
-      protocol: 'socket.io',
-      path: '/socket.io',
-      note: 'Connect with JWT in auth handshake when enabled on client.',
-    };
+  @Post('admin/fix-parent-visibility')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Admin: set parentVisible = true on all existing conversations',
+    description: 'One-time migration to fix conversations created before the parentVisible default was changed to true.',
+  })
+  async fixParentVisibility() {
+    return this.chat.setAllParentVisible();
   }
 
   @Post('conversations')

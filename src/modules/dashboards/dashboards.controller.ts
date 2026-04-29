@@ -1,5 +1,5 @@
 import { Controller, Get, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -56,5 +56,51 @@ export class DashboardsController {
       if (!link) throw new ForbiddenException('Not linked to this student');
     }
     return this.dash.student(studentId);
+  }
+
+  @Get('children/:studentId')
+  @Roles(UserRole.PARENT, UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Parent: full child dashboard',
+    description:
+      'Returns grades average per subject (all released entries), ' +
+      'overall attendance % and per-subject breakdown, ' +
+      'and upcoming/active exams & assignments for the child. ' +
+      'Requires a valid parent-student link.',
+  })
+  @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      example: {
+        student: { id: 'uuid', firstName: 'Ali', lastName: 'Hassan', email: 'ali@school.edu' },
+        grades: {
+          overallAveragePercent: 81.4,
+          bySubject: [
+            { subjectId: 'uuid', subjectName: 'Biology', gradedEntries: 5, averagePercent: 84.2 },
+          ],
+        },
+        attendance: {
+          overall: { total: 60, present: 52, absent: 4, excused: 4, attendancePercent: 86.7 },
+          bySubject: [
+            { subjectId: 'uuid', subjectName: 'Biology', total: 20, present: 18, absent: 1, excused: 1, attendancePercent: 90.0 },
+          ],
+        },
+        upcoming: {
+          exams: [{ id: 'uuid', title: 'Biology Midterm', opensAt: '2026-05-10T09:00:00Z', closesAt: '2026-05-10T11:00:00Z', maxPoints: 100, status: 'upcoming', score: null, classOfferingId: 'uuid' }],
+          assignments: [{ id: 'uuid', title: 'Chapter 3 Worksheet', deadline: '2026-05-15T23:59:00Z', maxScore: 100, status: 'pending', score: null, classOfferingId: 'uuid' }],
+          summary: { examsTotal: 2, examsAvailable: 0, assignmentsTotal: 3, assignmentsPending: 2 },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 403, description: 'Not linked to this student' })
+  @ApiResponse({ status: 404, description: 'Student not found' })
+  async childDashboard(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @CurrentUser() user: User,
+  ) {
+    const parentId = user.role === UserRole.ADMIN ? null : user.id;
+    return this.dash.parentChildDashboard(parentId, studentId);
   }
 }
