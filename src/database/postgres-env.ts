@@ -10,6 +10,11 @@ export type PostgresConnectionFields = {
   password?: string;
   database?: string;
   ssl?: boolean | { rejectUnauthorized: boolean };
+  connectTimeoutMS?: number;
+  extra?: {
+    connectionTimeoutMillis?: number;
+    query_timeout?: number;
+  };
 };
 
 /** Neon often appends channel_binding=require; node-pg can fail to connect with it. */
@@ -34,7 +39,15 @@ export function getPostgresConnectionFromEnv(): PostgresConnectionFields {
   const rawUrl = process.env.DATABASE_URL?.trim();
   const databaseUrl = useDatabaseUrl && rawUrl ? normalizePostgresUrl(rawUrl) : undefined;
   if (databaseUrl) {
-    return { url: databaseUrl };
+    return { 
+      url: databaseUrl,
+      // Increase timeout for cloud databases
+      connectTimeoutMS: 30000,
+      extra: {
+        connectionTimeoutMillis: 30000,
+        query_timeout: 30000,
+      }
+    };
   }
 
   const host = process.env.DB_HOST || 'localhost';
