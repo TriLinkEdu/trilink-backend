@@ -26,7 +26,6 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AiModule } from './modules/ai/ai.module';
 import { GamificationModule } from './modules/gamification/gamification.module';
 import { GoalsModule } from './modules/goals/goals.module';
-import { AssignmentsModule } from './modules/assignments/assignments.module';
 import { StudentProfilesModule } from './modules/student-profiles/student-profiles.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
@@ -36,11 +35,13 @@ import { HealthModule } from './modules/health/health.module';
 import { GradesModule } from './modules/grades/grades.module';
 import { AssignmentsModule } from './modules/assignments/assignments.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
+// Modules added by other team members
 import { TextbooksModule } from './modules/textbooks/textbooks.module';
-import { CurriculumModule } from './modules/curriculum/curriculum.module';
-import { ResourcesModule } from './modules/resources/resources.module';
 import { LearningMaterialsModule } from './modules/learning-materials/learning-materials.module';
+import { ResourcesModule } from './modules/resources/resources.module';
+import { CurriculumModule } from './modules/curriculum/curriculum.module';
 import { TopicsModule } from './modules/topics/topics.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [appConfig] }),
@@ -80,7 +81,6 @@ import { TopicsModule } from './modules/topics/topics.module';
     AiModule,
     GamificationModule,
     GoalsModule,
-    AssignmentsModule,
     StudentProfilesModule,
     ReportsModule,
     AnalyticsModule,
@@ -89,6 +89,12 @@ import { TopicsModule } from './modules/topics/topics.module';
     RealtimeModule,
     GradesModule,
     AssignmentsModule,
+    // Modules added by other team members
+    TopicsModule,
+    TextbooksModule,
+    LearningMaterialsModule,
+    ResourcesModule,
+    CurriculumModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
