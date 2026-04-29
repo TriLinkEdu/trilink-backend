@@ -76,9 +76,18 @@ export class FilesController {
 
   @Public()
   @Get(':id/download')
-  @ApiOperation({ summary: 'Download file content (authenticated)' })
+  @ApiOperation({ summary: 'Download or view file — redirects to Cloudinary URL' })
   async download(@Param('id', ParseUUIDPipe) id: string, @Res() res: Response) {
     const rec = await this.files.getOrThrow(id);
+    // Redirect directly to the Cloudinary URL so the browser handles it natively
     return res.redirect(rec.path);
+  }
+
+  @Public()
+  @Get(':id/url')
+  @ApiOperation({ summary: 'Get the direct file URL (Cloudinary)' })
+  async getUrl(@Param('id', ParseUUIDPipe) id: string) {
+    const rec = await this.files.getOrThrow(id);
+    return { url: rec.path, filename: rec.filename, mime: rec.mime };
   }
 }

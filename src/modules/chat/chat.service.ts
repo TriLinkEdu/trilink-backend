@@ -23,14 +23,13 @@ export class ChatService {
     if (!m) throw new ForbiddenException('Not a member');
   }
 
-  /** Read: member, or parent with parentVisible + linked child is a member, or admin. */
+  /** Read: member, or parent whose linked child is a member, or admin. */
   async assertReadAccess(conversationId: string, user: User) {
     if (user.role === UserRole.ADMIN) return;
     const m = await this.memRepo.findOne({ where: { conversationId, userId: user.id } });
     if (m) return;
     if (user.role !== UserRole.PARENT) throw new ForbiddenException('Not a member');
-    const conv = await this.convRepo.findOne({ where: { id: conversationId } });
-    if (!conv?.parentVisible) throw new ForbiddenException('Not a member');
+    // Parent can read any conversation their linked child is a member of
     const members = await this.memRepo.find({ where: { conversationId } });
     const linkedChildIds = (await this.psRepo.find({ where: { parentId: user.id } })).map((l) => l.studentId);
     const ok = members.some((mem) => linkedChildIds.includes(mem.userId));
@@ -57,14 +56,9 @@ export class ChatService {
       const links = await this.psRepo.find({ where: { parentId: userId } });
       const childIds = links.map((l) => l.studentId);
       if (childIds.length) {
+        // Parent sees ALL conversations their children are in (no parentVisible restriction)
         const childMems = await this.memRepo.find({ where: { userId: In(childIds) } });
-        const convIds = [...new Set(childMems.map((m) => m.conversationId))];
-        if (convIds.length) {
-          const convs = await this.convRepo.find({
-            where: { id: In(convIds), parentVisible: true },
-          });
-          extra = convs.map((c) => c.id);
-        }
+        extra = [...new Set(childMems.map((m) => m.conversationId))];
       }
     }
     const all = [...new Set([...fromMember, ...extra])];
@@ -181,6 +175,31 @@ export class ChatService {
 
   async listAllConversations(take = 50, skip = 0) {
     return this.convRepo.find({ order: { updatedAt: 'DESC' }, take, skip });
+  }
+
+  /** Parent: list all conversations the linked child is a member of */
+  async listChildConversations(parentId: string, studentId: string) {
+    const link = await this.psRepo.findOne({ where: { parentId, studentId } });
+    if (!link) throw new ForbiddenException('Not linked to this student');
+    const mems = await this.memRepo.find({ where: { userId: studentId } });
+    if (!mems.length) return [];
+    const convIds = mems.map((m) => m.conversationId);
+    return this.convRepo.find({ where: { id: In(convIds) }, order: { updatedAt: 'DESC' } });
+  }
+
+  /** Parent: read messages in a conversation the linked child is part of */
+  async listChildConversationMessages(parentId: string, studentId: string, conversationId: string, limit = 50, skip = 0) {
+    const link = await this.psRepo.findOne({ where: { parentId, studentId } });
+    if (!link) throw new ForbiddenException('Not linked to this student');
+    const mem = await this.memRepo.findOne({ where: { conversationId, userId: studentId } });
+    if (!mem) throw new ForbiddenException('Child is not a member of this conversation');
+    const messages = await this.msgRepo.find({
+      where: { conversationId },
+      order: { createdAt: 'DESC' },
+      take: limit,
+      skip,
+    });
+    return { conversationId, messages };
   }
 
   /** Initiate a direct conversation between two users */

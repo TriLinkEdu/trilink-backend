@@ -206,32 +206,46 @@ export class GradesController {
   @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
   @ApiOperation({
     summary: 'All released grades for a student',
-    description:
-      'Students see only their own released grades. Parents see their linked child\'s released grades. ' +
-      'Teachers/admin see all (including unreleased).',
+    description: 'Students see only their own released grades. Parents see their linked child\'s released grades. Teachers/admin see all.',
   })
   @ApiParam({ name: 'studentId', description: 'Student UUID' })
   @ApiQuery({ name: 'classOfferingId', required: false, description: 'Filter by class (optional)' })
+  listForStudent(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
+    return this.svc.listForStudent(studentId, user);
+  }
+
+  @Get('student/:studentId/by-subject/:subjectId')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({
+    summary: 'Grades for a student filtered by subject',
+    description:
+      'Returns all released grade entries for the student in a specific subject, with a summary (total, average %). ' +
+      'Students can only view their own. Parents can only view their linked child. ' +
+      'Use GET /enrollments/mine/subjects or GET /enrollments/children/:studentId/subjects to get subject IDs.',
+  })
+  @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  @ApiParam({ name: 'subjectId', description: 'Subject UUID' })
   @ApiResponse({
     status: 200,
     schema: {
-      example: [
-        {
-          id: 'uuid',
-          title: 'Midterm Exam',
-          type: 'exam',
-          score: 85,
-          maxScore: 100,
-          releasedAt: '2026-04-20T10:00:00.000Z',
-          subjectName: 'Biology',
-          gradeName: 'Grade 9',
-          sectionName: 'A',
-          student: { id: 'uuid', firstName: 'Ali', lastName: 'Hassan', email: 'ali@school.edu' },
-        },
-      ],
+      example: {
+        studentId: 'uuid',
+        studentName: 'Ali Hassan',
+        subjectId: 'uuid',
+        subjectName: 'Biology',
+        summary: { total: 5, withScore: 5, averagePercent: 82.4 },
+        entries: [
+          { id: 'uuid', title: 'Assignment 1', type: 'assignment', score: 88, maxScore: 100, releasedAt: '2026-04-20T10:00:00.000Z', note: null },
+        ],
+      },
     },
   })
-  listForStudent(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
-    return this.svc.listForStudent(studentId, user);
+  @ApiResponse({ status: 403, description: 'Not allowed to view this student' })
+  listForStudentBySubject(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @Param('subjectId', ParseUUIDPipe) subjectId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.listForStudentBySubject(studentId, subjectId, user);
   }
 }

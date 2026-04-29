@@ -58,9 +58,15 @@ export class ClassOfferingsController {
 
   @Get()
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
-  @ApiOperation({ summary: 'List offerings by academic year (admin/teacher)' })
-  list(@Query('academicYearId') academicYearId: string) {
+  @ApiOperation({
+    summary: 'List offerings by academic year',
+    description: 'Admin: all offerings for the year. Teacher: only their own offerings (same as /mine).',
+  })
+  list(@Query('academicYearId') academicYearId: string, @CurrentUser() user: User) {
     if (!academicYearId) throw new BadRequestException('academicYearId query required');
+    if (user.role === UserRole.TEACHER) {
+      return this.svc.listForTeacher(user.id, academicYearId);
+    }
     return this.svc.list(academicYearId);
   }
 

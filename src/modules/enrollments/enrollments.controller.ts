@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsUUID } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -34,6 +34,39 @@ export class EnrollmentsController {
     return this.svc.list({ studentId, classOfferingId, academicYearId });
   }
 
+  @Get('class/:classOfferingId/students')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({
+    summary: 'Student roster for a class offering (teacher)',
+    description:
+      'Returns all actively enrolled students in a class offering with their name, email, and profile details. ' +
+      'Teachers can only query classes they teach; admins can query any.',
+  })
+  @ApiParam({ name: 'classOfferingId', description: 'Class offering UUID' })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      example: {
+        classOfferingId: 'uuid',
+        className: 'Biology 9A',
+        subject: { id: 'uuid', name: 'Biology', code: 'Bio' },
+        grade: { id: 'uuid', name: 'Grade 9' },
+        section: { id: 'uuid', name: 'A' },
+        studentCount: 25,
+        students: [
+          { studentId: 'uuid', firstName: 'Ali', lastName: 'Hassan', email: 'ali@school.edu', enrollmentId: 'uuid' },
+        ],
+      },
+    },
+  })
+  @ApiResponse({ status: 403, description: 'You do not teach this class' })
+  classRoster(
+    @Param('classOfferingId', ParseUUIDPipe) classOfferingId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.classRoster(classOfferingId, user);
+  }
+
   @Get('mine')
   @Roles(UserRole.STUDENT)
   @ApiOperation({ summary: 'My active enrollments with class, subject, teacher' })
@@ -46,6 +79,52 @@ export class EnrollmentsController {
   @ApiOperation({ summary: 'Linked child enrollments (subject / teacher detail)' })
   childEnrollments(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
     return this.svc.listForParentChild(user.id, studentId);
+  }
+
+  @Get('children/:studentId/subjects')
+  @Roles(UserRole.PARENT)
+  @ApiOperation({
+    summary: "Parent: get child's subject list",
+    description: 'Returns all subjects the linked child is currently enrolled in, with teacher and class details.',
+  })
+  @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      example: [
+        {
+          subjectId: 'uuid', subjectName: 'Biology', subjectCode: 'Bio',
+          classOfferingId: 'uuid', gradeName: 'Grade 9', sectionName: 'A',
+          teacher: { id: 'uuid', firstName: 'Abdu', lastName: 'Isa', email: 'abdu@school.edu' },
+        },
+      ],
+    },
+  })
+  @ApiResponse({ status: 403, description: 'Not linked to this student' })
+  childSubjects(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
+    return this.svc.listSubjectsForParentChild(user.id, studentId);
+  }
+
+  @Get('mine/subjects')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({
+    summary: 'Student: get my subject list',
+    description: 'Returns all subjects the authenticated student is currently enrolled in.',
+  })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      example: [
+        {
+          subjectId: 'uuid', subjectName: 'Biology', subjectCode: 'Bio',
+          classOfferingId: 'uuid', gradeName: 'Grade 9', sectionName: 'A',
+          teacher: { id: 'uuid', firstName: 'Abdu', lastName: 'Isa', email: 'abdu@school.edu' },
+        },
+      ],
+    },
+  })
+  mySubjects(@CurrentUser() user: User) {
+    return this.svc.listSubjectsForStudent(user.id);
   }
 
   @Post()

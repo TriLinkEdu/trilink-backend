@@ -1,126 +1,351 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
-import { Assignment } from './entities/assignment.entity';
-import { AssignmentSubmission } from './entities/assignment-submission.entity';
-import { Enrollment } from '../enrollments/entities/enrollment.entity';
+import { Repository } from 'typeorm';
+import { Assignment, SubmissionType } from './entities/assignment.entity';
+import { AssignmentSubmission, SubmissionStatus } from './entities/assignment-submission.entity';
 import { User, UserRole } from '../users/entities/user.entity';
+import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
+import { Enrollment } from '../enrollments/entities/enrollment.entity';
+import { ParentStudent } from '../parent-students/entities/parent-student.entity';
+import { Subject } from '../school-structure/entities/subject.entity';
+import { Grade } from '../school-structure/entities/grade.entity';
+import { Section } from '../school-structure/entities/section.entity';
+import { FileRecord } from '../files/entities/file-record.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { GradesService } from '../grades/grades.service';
+import { GradeEntryType } from '../grades/entities/grade-entry.entity';
 
 @Injectable()
 export class AssignmentsService {
   constructor(
-    @InjectRepository(Assignment) private readonly assignmentRepo: Repository<Assignment>,
-    @InjectRepository(AssignmentSubmission) private readonly submissionRepo: Repository<AssignmentSubmission>,
-    @InjectRepository(Enrollment) private readonly enrollmentRepo: Repository<Enrollment>,
+    @InjectRepository(Assignment) private readonly repo: Repository<Assignment>,
+    @InjectRepository(AssignmentSubmission) private readonly subRepo: Repository<AssignmentSubmission>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+    @InjectRepository(ClassOffering) private readonly coRepo: Repository<ClassOffering>,
+    @InjectRepository(Enrollment) private readonly enrRepo: Repository<Enrollment>,
+    @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
+    @InjectRepository(Subject) private readonly subjectRepo: Repository<Subject>,
+    @InjectRepository(Grade) private readonly gradeRepo: Repository<Grade>,
+    @InjectRepository(Section) private readonly sectionRepo: Repository<Section>,
+    @InjectRepository(FileRecord) private readonly fileRepo: Repository<FileRecord>,
+    private readonly notifications: NotificationsService,
+    private readonly grades: GradesService,
   ) {}
 
-  private async allowedClassIdsForStudent(studentId: string): Promise<string[]> {
-    const rows = await this.enrollmentRepo.find({ where: { studentId, status: 'active' } });
-    return [...new Set(rows.map((r) => r.classOfferingId))];
+  // ── Guards ────────────────────────────────────────────────────────────────
+
+  private async assertTeacherOwns(assignment: Assignment, viewer: User) {
+    if (viewer.role === UserRole.ADMIN) return;
+    if (viewer.role === UserRole.TEACHER && assignment.teacherId === viewer.id) return;
+    throw new ForbiddenException('You do not own this assignment');
   }
 
-  private statusFor(assignment: Assignment, submission?: AssignmentSubmission): 'pending' | 'submitted' | 'graded' | 'overdue' {
-    if (submission?.score != null) return 'graded';
-    if (submission) return 'submitted';
-    if (assignment.dueDate && assignment.dueDate.getTime() < Date.now()) {
-      return 'overdue';
+  private async assertStudentEnrolled(assignment: Assignment, studentId: string) {
+    const enr = await this.enrRepo.findOne({ where: { classOfferingId: assignment.classOfferingId, studentId, status: 'active' } });
+    if (!enr) throw new ForbiddenException('You are not enrolled in this class');
+  }
+
+  private async assertCanViewStudent(viewer: User, studentId: string) {
+    if (viewer.role === UserRole.ADMIN || viewer.role === UserRole.TEACHER) return;
+    if (viewer.role === UserRole.STUDENT && viewer.id === studentId) return;
+    if (viewer.role === UserRole.PARENT) {
+      const link = await this.psRepo.findOne({ where: { parentId: viewer.id, studentId } });
+      if (link) return;
     }
-    return 'pending';
+    throw new ForbiddenException('Cannot access this student');
   }
 
-  private toDto(assignment: Assignment, submission?: AssignmentSubmission) {
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  private async enrichAssignment(a: Assignment) {
+    const co = await this.coRepo.findOne({ where: { id: a.classOfferingId } });
+    const [subject, grade, section, teacher, attachment] = await Promise.all([
+      co ? this.subjectRepo.findOne({ where: { id: co.subjectId } }) : null,
+      co ? this.gradeRepo.findOne({ where: { id: co.gradeId } }) : null,
+      co ? this.sectionRepo.findOne({ where: { id: co.sectionId } }) : null,
+      this.userRepo.findOne({ where: { id: a.teacherId } }),
+      a.attachmentFileId ? this.fileRepo.findOne({ where: { id: a.attachmentFileId } }) : null,
+    ]);
     return {
-      id: assignment.id,
-      title: assignment.title,
-      subject: assignment.subject || 'General',
-      description: assignment.description,
-      dueDate: assignment.dueDate,
-      status: this.statusFor(assignment, submission),
-      score: submission?.score ?? null,
-      maxScore: assignment.maxScore,
-      feedback: submission?.feedbackText ?? null,
-      submittedAt: submission?.submittedAt ?? null,
-      submittedContent: submission?.content ?? null,
+      ...a,
+      subject: subject ? { id: subject.id, name: subject.name, code: subject.code } : null,
+      grade: grade ? { id: grade.id, name: grade.name } : null,
+      section: section ? { id: section.id, name: section.name } : null,
+      teacher: teacher ? { id: teacher.id, firstName: teacher.firstName, lastName: teacher.lastName, email: teacher.email } : null,
+      attachment: attachment ? { id: attachment.id, filename: attachment.filename, mime: attachment.mime, path: attachment.path } : null,
+      isOverdue: new Date() > new Date(a.deadline),
     };
   }
 
-  async listMine(user: User) {
-    if (user.role !== UserRole.STUDENT) {
-      throw new ForbiddenException('Only students can access assignments');
+  // ── Teacher CRUD ──────────────────────────────────────────────────────────
+
+  async create(body: {
+    classOfferingId: string;
+    title: string;
+    description?: string;
+    submissionType: SubmissionType;
+    attachmentFileId?: string;
+    deadline: string;
+    maxScore?: number;
+  }, teacher: User) {
+    const co = await this.coRepo.findOne({ where: { id: body.classOfferingId } });
+    if (!co) throw new NotFoundException('Class offering not found');
+    if (teacher.role === UserRole.TEACHER && co.teacherId !== teacher.id) {
+      throw new ForbiddenException('You do not teach this class');
     }
-
-    const classIds = await this.allowedClassIdsForStudent(user.id);
-    const qb = this.assignmentRepo
-      .createQueryBuilder('a')
-      .orderBy('a.due_date', 'ASC', 'NULLS LAST')
-      .addOrderBy('a.created_at', 'DESC');
-    if (classIds.length === 0) {
-      qb.where('a.class_offering_id IS NULL');
-    } else {
-      qb.where('(a.class_offering_id IS NULL OR a.class_offering_id IN (:...classIds))', { classIds });
-    }
-
-    const assignments = await qb.getMany();
-    if (assignments.length === 0) return [];
-
-    const submissions = await this.submissionRepo.find({
-      where: { assignmentId: In(assignments.map((a) => a.id)), studentId: user.id },
-    });
-    const subMap = new Map(submissions.map((s) => [s.assignmentId, s]));
-    return assignments.map((a) => this.toDto(a, subMap.get(a.id)));
+    const assignment = await this.repo.save(this.repo.create({
+      classOfferingId: body.classOfferingId,
+      teacherId: teacher.id,
+      title: body.title,
+      description: body.description ?? null,
+      submissionType: body.submissionType,
+      attachmentFileId: body.attachmentFileId ?? null,
+      deadline: new Date(body.deadline),
+      maxScore: body.maxScore ?? 100,
+      published: false,
+    }));
+    return this.enrichAssignment(assignment);
   }
 
-  async getMineById(user: User, assignmentId: string) {
-    if (user.role !== UserRole.STUDENT) {
-      throw new ForbiddenException('Only students can access assignments');
-    }
-    const assignment = await this.assignmentRepo.findOne({ where: { id: assignmentId } });
-    if (!assignment) throw new NotFoundException('Assignment not found');
-
-    const classIds = await this.allowedClassIdsForStudent(user.id);
-    const visible = !assignment.classOfferingId || classIds.includes(assignment.classOfferingId);
-    if (!visible) throw new ForbiddenException('Cannot access this assignment');
-
-    const submission = await this.submissionRepo.findOne({
-      where: { assignmentId: assignment.id, studentId: user.id },
-    });
-    return this.toDto(assignment, submission ?? undefined);
+  async update(id: string, body: Partial<{
+    title: string;
+    description: string;
+    submissionType: SubmissionType;
+    attachmentFileId: string | null;
+    deadline: string;
+    maxScore: number;
+  }>, viewer: User) {
+    const a = await this.repo.findOne({ where: { id } });
+    if (!a) throw new NotFoundException('Assignment not found');
+    await this.assertTeacherOwns(a, viewer);
+    if (a.published) throw new BadRequestException('Cannot edit a published assignment. Unpublish first.');
+    if (body.title !== undefined) a.title = body.title;
+    if (body.description !== undefined) a.description = body.description;
+    if (body.submissionType !== undefined) a.submissionType = body.submissionType;
+    if (body.attachmentFileId !== undefined) a.attachmentFileId = body.attachmentFileId;
+    if (body.deadline !== undefined) a.deadline = new Date(body.deadline);
+    if (body.maxScore !== undefined) a.maxScore = body.maxScore;
+    const saved = await this.repo.save(a);
+    return this.enrichAssignment(saved);
   }
 
-  async submitMine(user: User, assignmentId: string, content: string) {
-    if (user.role !== UserRole.STUDENT) {
-      throw new ForbiddenException('Only students can submit assignments');
-    }
-    const trimmed = content.trim();
-    if (!trimmed) throw new BadRequestException('Submission content is required');
+  async publish(id: string, viewer: User) {
+    const a = await this.repo.findOne({ where: { id } });
+    if (!a) throw new NotFoundException('Assignment not found');
+    await this.assertTeacherOwns(a, viewer);
+    if (a.published) throw new BadRequestException('Already published');
+    a.published = true;
+    await this.repo.save(a);
 
-    const assignment = await this.assignmentRepo.findOne({ where: { id: assignmentId } });
-    if (!assignment) throw new NotFoundException('Assignment not found');
-
-    const classIds = await this.allowedClassIdsForStudent(user.id);
-    const visible = !assignment.classOfferingId || classIds.includes(assignment.classOfferingId);
-    if (!visible) throw new ForbiddenException('Cannot submit this assignment');
-
-    const now = new Date();
-    let row = await this.submissionRepo.findOne({
-      where: { assignmentId: assignment.id, studentId: user.id },
-    });
-
-    if (!row) {
-      row = this.submissionRepo.create({
-        assignmentId: assignment.id,
-        studentId: user.id,
-        content: trimmed,
-        submittedAt: now,
-        score: null,
-        feedbackText: null,
+    // Notify all enrolled students
+    const enrollments = await this.enrRepo.find({ where: { classOfferingId: a.classOfferingId, status: 'active' } });
+    const deadlineStr = new Date(a.deadline).toLocaleDateString();
+    for (const e of enrollments) {
+      await this.notifications.createForUser(e.studentId, {
+        type: 'assignment',
+        title: `New assignment: ${a.title}`,
+        body: `Due ${deadlineStr}. ${a.description ? a.description.slice(0, 100) : ''}`,
+        payloadJson: JSON.stringify({ assignmentId: a.id, classOfferingId: a.classOfferingId }),
       });
-    } else {
-      row.content = trimmed;
-      row.submittedAt = now;
+    }
+    return { ok: true, notified: enrollments.length };
+  }
+
+  async unpublish(id: string, viewer: User) {
+    const a = await this.repo.findOne({ where: { id } });
+    if (!a) throw new NotFoundException('Assignment not found');
+    await this.assertTeacherOwns(a, viewer);
+    a.published = false;
+    return this.repo.save(a);
+  }
+
+  async remove(id: string, viewer: User) {
+    const a = await this.repo.findOne({ where: { id } });
+    if (!a) throw new NotFoundException('Assignment not found');
+    await this.assertTeacherOwns(a, viewer);
+    if (a.published) throw new BadRequestException('Unpublish before deleting');
+    await this.repo.remove(a);
+    return { ok: true };
+  }
+
+  // ── Listing ───────────────────────────────────────────────────────────────
+
+  async listForTeacher(teacherId: string, classOfferingId?: string) {
+    const qb = this.repo.createQueryBuilder('a')
+      .where('a.teacher_id = :tid', { tid: teacherId })
+      .orderBy('a.deadline', 'ASC');
+    if (classOfferingId) qb.andWhere('a.class_offering_id = :cid', { cid: classOfferingId });
+    const list = await qb.getMany();
+    return Promise.all(list.map(a => this.enrichAssignment(a)));
+  }
+
+  async listForStudent(studentId: string, viewer: User) {
+    await this.assertCanViewStudent(viewer, studentId);
+    const enrollments = await this.enrRepo.find({ where: { studentId, status: 'active' } });
+    const classIds = enrollments.map(e => e.classOfferingId);
+    if (!classIds.length) return [];
+
+    const assignments = await this.repo
+      .createQueryBuilder('a')
+      .where('a.class_offering_id IN (:...ids)', { ids: classIds })
+      .andWhere('a.published = :pub', { pub: true })
+      .orderBy('a.deadline', 'ASC')
+      .getMany();
+
+    return Promise.all(assignments.map(async (a) => {
+      const enriched = await this.enrichAssignment(a);
+      const submission = await this.subRepo.findOne({ where: { assignmentId: a.id, studentId } });
+      return { ...enriched, submission: submission ?? null };
+    }));
+  }
+
+  async getOne(id: string, viewer: User) {
+    const a = await this.repo.findOne({ where: { id } });
+    if (!a) throw new NotFoundException('Assignment not found');
+
+    if (viewer.role === UserRole.STUDENT) {
+      if (!a.published) throw new ForbiddenException('Assignment not published');
+      await this.assertStudentEnrolled(a, viewer.id);
+    } else if (viewer.role === UserRole.TEACHER) {
+      await this.assertTeacherOwns(a, viewer);
     }
 
-    const saved = await this.submissionRepo.save(row);
-    return this.toDto(assignment, saved);
+    const enriched = await this.enrichAssignment(a);
+    if (viewer.role === UserRole.STUDENT) {
+      const submission = await this.subRepo.findOne({ where: { assignmentId: id, studentId: viewer.id } });
+      return { ...enriched, submission: submission ?? null };
+    }
+    return enriched;
+  }
+
+  // ── Submissions ───────────────────────────────────────────────────────────
+
+  async submit(assignmentId: string, body: { fileId?: string; textContent?: string }, student: User) {
+    const a = await this.repo.findOne({ where: { id: assignmentId } });
+    if (!a) throw new NotFoundException('Assignment not found');
+    if (!a.published) throw new BadRequestException('Assignment not published');
+    if (new Date() > new Date(a.deadline)) throw new BadRequestException('Deadline has passed');
+    await this.assertStudentEnrolled(a, student.id);
+
+    if (a.submissionType === SubmissionType.FILE && !body.fileId) {
+      throw new BadRequestException('File upload required for this assignment');
+    }
+    if (a.submissionType === SubmissionType.TEXT && !body.textContent?.trim()) {
+      throw new BadRequestException('Text response required for this assignment');
+    }
+
+    let sub = await this.subRepo.findOne({ where: { assignmentId, studentId: student.id } });
+    if (sub && sub.status !== SubmissionStatus.PENDING) {
+      throw new BadRequestException('Already submitted');
+    }
+
+    if (!sub) {
+      sub = this.subRepo.create({ assignmentId, studentId: student.id });
+    }
+    sub.fileId = body.fileId ?? null;
+    sub.textContent = body.textContent ?? null;
+    sub.status = SubmissionStatus.SUBMITTED;
+    sub.submittedAt = new Date();
+    const saved = await this.subRepo.save(sub);
+
+    // Notify teacher
+    const studentUser = await this.userRepo.findOne({ where: { id: student.id } });
+    await this.notifications.createForUser(a.teacherId, {
+      type: 'assignment_submission',
+      title: 'New submission',
+      body: `${studentUser?.firstName ?? 'A student'} submitted "${a.title}"`,
+      payloadJson: JSON.stringify({ assignmentId, submissionId: saved.id, studentId: student.id }),
+    });
+
+    return saved;
+  }
+
+  async listSubmissions(assignmentId: string, viewer: User) {
+    const a = await this.repo.findOne({ where: { id: assignmentId } });
+    if (!a) throw new NotFoundException('Assignment not found');
+    await this.assertTeacherOwns(a, viewer);
+
+    const subs = await this.subRepo.find({ where: { assignmentId }, order: { submittedAt: 'DESC' } });
+    return Promise.all(subs.map(async (s) => {
+      const student = await this.userRepo.findOne({ where: { id: s.studentId } });
+      const file = s.fileId ? await this.fileRepo.findOne({ where: { id: s.fileId } }) : null;
+      return {
+        ...s,
+        student: student ? { id: student.id, firstName: student.firstName, lastName: student.lastName, email: student.email } : null,
+        file: file ? { id: file.id, filename: file.filename, mime: file.mime, path: file.path } : null,
+      };
+    }));
+  }
+
+  async gradeSubmission(submissionId: string, body: { score: number; feedback?: string }, viewer: User) {
+    const sub = await this.subRepo.findOne({ where: { id: submissionId } });
+    if (!sub) throw new NotFoundException('Submission not found');
+    const a = await this.repo.findOne({ where: { id: sub.assignmentId } });
+    if (!a) throw new NotFoundException('Assignment not found');
+    await this.assertTeacherOwns(a, viewer);
+
+    if (body.score < 0 || body.score > a.maxScore) {
+      throw new BadRequestException(`Score must be between 0 and ${a.maxScore}`);
+    }
+
+    sub.score = body.score;
+    sub.feedback = body.feedback ?? null;
+    sub.status = SubmissionStatus.GRADED;
+    sub.gradedById = viewer.id;
+    const saved = await this.subRepo.save(sub);
+    return saved;
+  }
+
+  async releaseGrade(submissionId: string, viewer: User) {
+    const sub = await this.subRepo.findOne({ where: { id: submissionId } });
+    if (!sub) throw new NotFoundException('Submission not found');
+    const a = await this.repo.findOne({ where: { id: sub.assignmentId } });
+    if (!a) throw new NotFoundException('Assignment not found');
+    await this.assertTeacherOwns(a, viewer);
+    if (sub.score == null) throw new BadRequestException('Grade the submission before releasing');
+
+    sub.status = SubmissionStatus.RETURNED;
+    sub.releasedAt = new Date();
+    const saved = await this.subRepo.save(sub);
+
+    // Notify student
+    const scoreLabel = `${sub.score} / ${a.maxScore}`;
+    await this.notifications.createForUser(sub.studentId, {
+      type: 'assignment_graded',
+      title: 'Assignment graded',
+      body: `Your submission for "${a.title}" has been graded (${scoreLabel}).`,
+      payloadJson: JSON.stringify({ assignmentId: a.id, submissionId: sub.id, score: sub.score, maxScore: a.maxScore }),
+    });
+
+    // Auto-create grade entry
+    void this.grades.autoCreateFromAssignment({
+      classOfferingId: a.classOfferingId,
+      studentId: sub.studentId,
+      teacherId: a.teacherId,
+      title: a.title,
+      submissionId: sub.id,
+      score: sub.score,
+      maxScore: a.maxScore,
+    }).catch(() => {});
+
+    return saved;
+  }
+
+  async releaseAllGrades(assignmentId: string, viewer: User) {
+    const a = await this.repo.findOne({ where: { id: assignmentId } });
+    if (!a) throw new NotFoundException('Assignment not found');
+    await this.assertTeacherOwns(a, viewer);
+
+    const subs = await this.subRepo.find({ where: { assignmentId } });
+    const toRelease = subs.filter(s => s.score != null && !s.releasedAt);
+    for (const sub of toRelease) {
+      await this.releaseGrade(sub.id, viewer);
+    }
+    return { released: toRelease.length };
   }
 }
