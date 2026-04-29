@@ -153,6 +153,17 @@ export class ChatService {
     return qb.getMany();
   }
 
+  /** One-time migration: set parentVisible = true on all conversations */
+  async setAllParentVisible() {
+    const result = await this.convRepo
+      .createQueryBuilder()
+      .update()
+      .set({ parentVisible: true })
+      .where('parent_visible = :v', { v: false })
+      .execute();
+    return { updated: result.affected ?? 0, message: 'All conversations are now visible to parents.' };
+  }
+
   async listAllConversations(take = 50, skip = 0) {
     return this.convRepo.find({ order: { updatedAt: 'DESC' }, take, skip });
   }
@@ -217,7 +228,7 @@ export class ChatService {
         type: 'direct',
         title,
         classOfferingId: null,
-        parentVisible: initiatorRole === UserRole.PARENT || initiatorRole === UserRole.STUDENT,
+        parentVisible: true,  // always visible to parents
         createdById: initiatorId,
       },
       [targetUserId],
