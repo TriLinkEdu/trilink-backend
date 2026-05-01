@@ -20,6 +20,8 @@ import { Notification } from '../modules/notifications/entities/notification.ent
 import { Conversation } from '../modules/chat/entities/conversation.entity';
 import { ConversationMember } from '../modules/chat/entities/conversation-member.entity';
 import { ChatMessage } from '../modules/chat/entities/chat-message.entity';
+import { ChatConnection } from '../modules/chat/entities/chat-connection.entity';
+import { BlockedUser } from '../modules/chat/entities/blocked-user.entity';
 import { UserSettings } from '../modules/settings/entities/user-settings.entity';
 import { SchoolSettings } from '../modules/settings/entities/school-settings.entity';
 import { FileRecord } from '../modules/files/entities/file-record.entity';
@@ -60,6 +62,8 @@ export const TYPEORM_ENTITIES = [
   Conversation,
   ConversationMember,
   ChatMessage,
+  ChatConnection,
+  BlockedUser,
   UserSettings,
   SchoolSettings,
   FileRecord,

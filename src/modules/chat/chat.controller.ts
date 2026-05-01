@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
@@ -12,15 +12,15 @@ import { ChatService } from './chat.service';
 import { InitiateChatDto } from './dto/initiate-chat.dto';
 
 class CreateConvDto {
-  @ApiProperty({ example: 'group' }) @IsString() type: string;
-  @ApiProperty() @IsString() @MinLength(1) title: string;
+  @ApiProperty({ example: 'group' }) @IsString() type!: string;
+  @ApiProperty() @IsString() @MinLength(1) title!: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() classOfferingId?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() parentVisible?: boolean;
-  @ApiProperty({ type: [String] }) @IsArray() @IsUUID('4', { each: true }) memberIds: string[];
+  @ApiProperty({ type: [String] }) @IsArray() @IsUUID('4', { each: true }) memberIds!: string[];
 }
 
 class MsgDto {
-  @ApiProperty() @IsString() @MinLength(1) text: string;
+  @ApiProperty() @IsString() @MinLength(1) text!: string;
 }
 
 @ApiTags('Chat')
@@ -185,5 +185,64 @@ export class ChatController {
     @CurrentUser() user: User,
   ) {
     return this.chat.initiateDirectChat(user.id, dto.targetUserId, user.role);
+  }
+
+  // ── Connection Management ──
+  @Post('connections/request')
+  @ApiOperation({ summary: 'Send connection request to another student' })
+  requestConnection(
+    @Body('recipientId', ParseUUIDPipe) recipientId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.requestConnection(user.id, recipientId);
+  }
+
+  @Put('connections/:id/accept')
+  @ApiOperation({ summary: 'Accept connection request' })
+  acceptConnection(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.acceptConnection(id, user.id);
+  }
+
+  @Put('connections/:id/reject')
+  @ApiOperation({ summary: 'Reject connection request' })
+  rejectConnection(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.rejectConnection(id, user.id);
+  }
+
+  @Get('connections')
+  @ApiOperation({ summary: 'Get my connections and pending requests' })
+  getConnections(@CurrentUser() user: User) {
+    return this.chat.getConnections(user.id);
+  }
+
+  // ── Blocking ──
+  @Post('blocked-users')
+  @ApiOperation({ summary: 'Block a user' })
+  blockUser(
+    @Body('blockedId', ParseUUIDPipe) blockedId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.blockUser(user.id, blockedId);
+  }
+
+  @Delete('blocked-users/:id')
+  @ApiOperation({ summary: 'Unblock a user' })
+  unblockUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.unblockUser(user.id, id);
+  }
+
+  @Get('blocked-users')
+  @ApiOperation({ summary: 'Get my blocked users' })
+  getBlockedUsers(@CurrentUser() user: User) {
+    return this.chat.getBlockedUsers(user.id);
   }
 }
