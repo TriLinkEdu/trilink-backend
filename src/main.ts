@@ -2,7 +2,10 @@ import { NestFactory } from '@nestjs/core';
 import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import * as express from 'express';
+import * as fs from 'fs';
 import { AppModule } from './app.module';
+import { localUploadsRoot } from './modules/files/storage/local-storage.provider';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -10,6 +13,12 @@ async function bootstrap() {
   const port = config.get<number>('port') ?? 4000;
   const host = config.get<string>('host') || process.env.HOST || '0.0.0.0';
   const prefix = config.get<string>('apiPrefix') ?? 'api';
+  const uploadsRoot = localUploadsRoot();
+
+  if (!fs.existsSync(uploadsRoot)) {
+    fs.mkdirSync(uploadsRoot, { recursive: true });
+  }
+  app.use('/uploads', express.static(uploadsRoot));
 
   app.setGlobalPrefix(prefix, {
     exclude: [{ path: 'health', method: RequestMethod.GET }],
