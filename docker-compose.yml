@@ -64,6 +64,9 @@ services:
       DB_TYPE: postgres
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      RESOURCE_STORAGE_DRIVER: local
+      RESOURCE_STORAGE_LOCAL_DIR: /app/uploads
+      RESOURCE_STORAGE_LOCAL_PUBLIC_BASE_URL: http://localhost:4000
     depends_on:
       db:
         condition: service_healthy
