@@ -33,6 +33,8 @@ import { AuditLog } from '../modules/audit/entities/audit-log.entity';
 import { Badge } from '../modules/gamification/entities/badge.entity';
 import { UserBadge } from '../modules/gamification/entities/user-badge.entity';
 import { LoginStreak } from '../modules/gamification/entities/login-streak.entity';
+import { Achievement } from '../modules/gamification/entities/achievement.entity';
+import { UserAchievement } from '../modules/gamification/entities/user-achievement.entity';
 import { StudentGoal } from '../modules/goals/entities/student-goal.entity';
 import { StudentProfile } from '../modules/student-profiles/entities/student-profile.entity';
 import { GradeEntry } from '../modules/grades/entities/grade-entry.entity';
@@ -79,6 +81,8 @@ export const TYPEORM_ENTITIES = [
   Badge,
   UserBadge,
   LoginStreak,
+  Achievement,
+  UserAchievement,
   StudentGoal,
   StudentProfile,
   GradeEntry,
