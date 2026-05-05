@@ -30,11 +30,28 @@ services:
     networks:
       - trilink
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - trilink_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - trilink
+
   api:
     build: .
     restart: unless-stopped
     ports:
       - "4000:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - .env
     environment:
@@ -45,8 +62,12 @@ services:
       DB_PASSWORD: trilink_secret
       DB_DATABASE: trilink
       DB_TYPE: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - trilink_uploads:/app/uploads
@@ -95,4 +116,5 @@ networks:
 
 volumes:
   trilink_pgdata:
+  trilink_redis:
   trilink_uploads:

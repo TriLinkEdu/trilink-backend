@@ -75,6 +75,20 @@ Once the server is running, access the interactive Swagger documentation at:
 2. Start a local Postgres (mapped to port 5433) or use the Docker DB: `docker compose up -d db`
 3. Run in dev mode: `npm run start:dev`
 
+#### DATABASE_URL override for local stability
+If your `.env` has a hosted `DATABASE_URL` (Neon/etc) but you want to run against local Postgres, set:
+
+```bash
+DB_USE_DATABASE_URL=false
+DB_HOST=localhost
+DB_PORT=5433
+DB_USERNAME=trilink
+DB_PASSWORD=trilink_secret
+DB_DATABASE=trilink
+```
+
+This prevents runtime `ECONNRESET` from hosted DB interruptions during local development.
+
 ### Persistent Storage
 The project uses Docker volumes to ensure that profile pictures and media assets persist across container restarts:
 - Volume: `trilink_uploads` → `/app/uploads`

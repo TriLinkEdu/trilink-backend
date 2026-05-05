@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UploadedFile,
   UseGuards,
@@ -44,9 +45,8 @@ class CreateConvDto {
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() classOfferingId?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() parentVisible?: boolean;
-  @ApiProperty({ type: [String] }) @IsArray() @IsUUID('4', { each: true }) memberIds: string[];
+  @ApiProperty({ type: [String] }) @IsArray() @IsUUID('4', { each: true }) memberIds!: string[];
 }
-
 @ApiTags('Chat')
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -336,5 +336,63 @@ export class ChatController {
   @ApiQuery({ name: 'q', required: false })
   searchUsers(@Query('q') query: string, @CurrentUser() user: User) {
     return this.chat.searchUsers(user, query || '');
+  }
+  // ── Connection Management ──
+  @Post('connections/request')
+  @ApiOperation({ summary: 'Send connection request to another student' })
+  requestConnection(
+    @Body('recipientId', ParseUUIDPipe) recipientId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.requestConnection(user.id, recipientId);
+  }
+
+  @Put('connections/:id/accept')
+  @ApiOperation({ summary: 'Accept connection request' })
+  acceptConnection(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.acceptConnection(id, user.id);
+  }
+
+  @Put('connections/:id/reject')
+  @ApiOperation({ summary: 'Reject connection request' })
+  rejectConnection(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.rejectConnection(id, user.id);
+  }
+
+  @Get('connections')
+  @ApiOperation({ summary: 'Get my connections and pending requests' })
+  getConnections(@CurrentUser() user: User) {
+    return this.chat.getConnections(user.id);
+  }
+
+  // ── Blocking ──
+  @Post('blocked-users')
+  @ApiOperation({ summary: 'Block a user' })
+  blockUserLegacy(
+    @Body('blockedId', ParseUUIDPipe) blockedId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.blockUser(user.id, blockedId);
+  }
+
+  @Delete('blocked-users/:id')
+  @ApiOperation({ summary: 'Unblock a user' })
+  unblockUserLegacy(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.unblockUser(user.id, id);
+  }
+
+  @Get('blocked-users')
+  @ApiOperation({ summary: 'Get my blocked users' })
+  getBlockedUsers(@CurrentUser() user: User) {
+    return this.chat.getBlockedUsers(user.id);
   }
 }

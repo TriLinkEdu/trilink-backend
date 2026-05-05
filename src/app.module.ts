@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import appConfig from './config/app.config';
 import { DatabaseModule } from './database/database.module';
+import { CacheModule } from './cache/cache.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { AcademicYearsModule } from './modules/academic-years/academic-years.module';
@@ -46,6 +47,7 @@ import { SearchModule } from './modules/search/search.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [appConfig] }),
+    CacheModule,
     HealthModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRootAsync({

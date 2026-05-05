@@ -831,13 +831,43 @@ export class ChatService {
   async searchUsers(user: User, searchTerm: string) {
     const userRepo = this.convRepo.manager.getRepository(User);
     const qb = userRepo.createQueryBuilder('u');
+    qb.where('u.id != :currentUserId', { currentUserId: user.id });
+
     if (searchTerm) {
-      qb.where('(u.firstName ILIKE :term OR u.lastName ILIKE :term OR u.subject ILIKE :term)', {
+      qb.andWhere('(u.firstName ILIKE :term OR u.lastName ILIKE :term OR u.subject ILIKE :term)', {
         term: `%${searchTerm}%`,
       });
     }
-    qb.select(['u.id', 'u.firstName', 'u.lastName', 'u.role', 'u.subject', 'u.grade', 'u.section', 'u.profileImageFileId', 'u.childName']);
-    qb.andWhere('u.id != :myId', { myId: user.id });
+
+    if (user.role === UserRole.STUDENT) {
+      qb.andWhere(
+        '(u.role = :teacherRole OR (u.role = :studentRole AND u.grade = :userGrade))',
+        {
+          teacherRole: UserRole.TEACHER,
+          studentRole: UserRole.STUDENT,
+          userGrade: user.grade,
+        },
+      );
+    }
+
+    if (user.role === UserRole.PARENT) {
+      qb.andWhere('u.role IN (:...allowedRoles)', {
+        allowedRoles: [UserRole.TEACHER, UserRole.ADMIN],
+      });
+    }
+
+    qb.select([
+      'u.id',
+      'u.firstName',
+      'u.lastName',
+      'u.role',
+      'u.subject',
+      'u.grade',
+      'u.section',
+      'u.profileImageFileId',
+      'u.childName',
+    ]);
+    qb.orderBy('u.role', 'ASC').addOrderBy('u.firstName', 'ASC');
     qb.take(20);
     return qb.getMany();
   }
@@ -879,6 +909,10 @@ export class ChatService {
   }
 
   async initiateDirectChat(initiatorId: string, targetUserId: string, initiatorRole: UserRole) {
+    const access = await this.canUserMessageUser(initiatorId, targetUserId);
+    if (!access.allowed) {
+      throw new ForbiddenException(access.reason || 'Cannot message this user');
+    }
     const initiatorConvs = await this.memRepo.find({ where: { userId: initiatorId } });
     const targetConvs = await this.memRepo.find({ where: { userId: targetUserId } });
     const initiatorConvIds = new Set(initiatorConvs.map((m) => m.conversationId));
@@ -901,5 +935,128 @@ export class ChatService {
       [targetUserId],
     );
     return { conversation, isNew: true };
+  }
+
+  // ── Connection Management ──
+  async requestConnection(requesterId: string, recipientId: string) {
+    const connRepo = this.convRepo.manager.getRepository('ChatConnection');
+    const existing = await connRepo.findOne({
+      where: [
+        { requesterId, recipientId },
+        { requesterId: recipientId, recipientId: requesterId },
+      ],
+    });
+    if (existing) throw new ForbiddenException('Connection already exists');
+
+    const connection = connRepo.create({ requesterId, recipientId, status: 'pending' });
+    return connRepo.save(connection);
+  }
+
+  async acceptConnection(connectionId: string, userId: string) {
+    const connRepo = this.convRepo.manager.getRepository('ChatConnection');
+    const conn = await connRepo.findOne({ where: { id: connectionId } });
+    if (!conn || conn.recipientId !== userId) throw new ForbiddenException('Invalid connection');
+    conn.status = 'accepted';
+    return connRepo.save(conn);
+  }
+
+  async rejectConnection(connectionId: string, userId: string) {
+    const connRepo = this.convRepo.manager.getRepository('ChatConnection');
+    const conn = await connRepo.findOne({ where: { id: connectionId } });
+    if (!conn || conn.recipientId !== userId) throw new ForbiddenException('Invalid connection');
+    conn.status = 'rejected';
+    return connRepo.save(conn);
+  }
+
+  async getConnections(userId: string) {
+    const connRepo = this.convRepo.manager.getRepository('ChatConnection');
+    const sent = await connRepo.find({ where: { requesterId: userId } });
+    const received = await connRepo.find({ where: { recipientId: userId } });
+    return { sent, received };
+  }
+
+  async areConnected(userId1: string, userId2: string): Promise<boolean> {
+    const connRepo = this.convRepo.manager.getRepository('ChatConnection');
+    const conn = await connRepo.findOne({
+      where: [
+        { requesterId: userId1, recipientId: userId2, status: 'accepted' },
+        { requesterId: userId2, recipientId: userId1, status: 'accepted' },
+      ],
+    });
+    return !!conn;
+  }
+
+  // ── Blocking ──
+  async getBlockedUsers(userId: string) {
+    return this.blockRepo.find({ where: { blockerId: userId } });
+  }
+
+  async isBlocked(userId1: string, userId2: string): Promise<boolean> {
+    const block = await this.blockRepo.findOne({
+      where: [
+        { blockerId: userId1, blockedId: userId2 },
+        { blockerId: userId2, blockedId: userId1 },
+      ],
+    });
+    return !!block;
+  }
+
+  // ── Access Control ──
+  async canUserMessageUser(fromUserId: string, toUserId: string): Promise<{ allowed: boolean; reason?: string }> {
+    // Check if blocked
+    if (await this.isBlocked(fromUserId, toUserId)) {
+      return { allowed: false, reason: 'User is blocked' };
+    }
+
+    const userRepo = this.convRepo.manager.getRepository(User);
+    const fromUser = await userRepo.findOne({ where: { id: fromUserId } });
+    const toUser = await userRepo.findOne({ where: { id: toUserId } });
+
+    if (!fromUser || !toUser) {
+      return { allowed: false, reason: 'User not found' };
+    }
+
+    // Students can message teachers in their classes
+    if (fromUser.role === UserRole.STUDENT && toUser.role === UserRole.TEACHER) {
+      const enrollmentRepo = this.convRepo.manager.getRepository('Enrollment');
+      const classOfferingRepo = this.convRepo.manager.getRepository('ClassOffering');
+      
+      // Get student's enrollments
+      const enrollments = await enrollmentRepo.find({ where: { studentId: fromUserId } });
+      const classIds = enrollments.map(e => e.classOfferingId);
+      
+      // Check if teacher teaches any of these classes
+      const classes = await classOfferingRepo.find({ where: { id: In(classIds), teacherId: toUserId } });
+      
+      if (classes.length > 0) {
+        return { allowed: true };
+      }
+      return { allowed: false, reason: 'Teacher does not teach your classes' };
+    }
+
+    // Students can message each other if connected
+    if (fromUser.role === UserRole.STUDENT && toUser.role === UserRole.STUDENT) {
+      if (await this.areConnected(fromUserId, toUserId)) {
+        return { allowed: true };
+      }
+      return { allowed: false, reason: 'Connection required to message other students' };
+    }
+
+    // Teachers can message anyone
+    if (fromUser.role === UserRole.TEACHER) {
+      return { allowed: true };
+    }
+
+    // Parents can message teachers
+    if (fromUser.role === UserRole.PARENT && toUser.role === UserRole.TEACHER) {
+      return { allowed: true };
+    }
+
+    // Admin can message anyone
+    if (fromUser.role === UserRole.ADMIN) {
+      return { allowed: true };
+    }
+
+    return { allowed: false, reason: 'Not authorized to message this user' };
   }
 }

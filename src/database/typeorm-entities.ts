@@ -22,6 +22,8 @@ import { Notification } from '../modules/notifications/entities/notification.ent
 import { Conversation } from '../modules/chat/entities/conversation.entity';
 import { ConversationMember } from '../modules/chat/entities/conversation-member.entity';
 import { ChatMessage } from '../modules/chat/entities/chat-message.entity';
+import { ChatConnection } from '../modules/chat/entities/chat-connection.entity';
+import { BlockedUser } from '../modules/chat/entities/blocked-user.entity';
 import { ConversationRead } from '../modules/chat/entities/conversation-read.entity';
 import { UserBlock } from '../modules/chat/entities/user-block.entity';
 import { UserSettings } from '../modules/settings/entities/user-settings.entity';
@@ -66,6 +68,8 @@ export const TYPEORM_ENTITIES = [
   Conversation,
   ConversationMember,
   ChatMessage,
+  ChatConnection,
+  BlockedUser,
   ConversationRead,
   UserBlock,
   UserSettings,
