@@ -7,6 +7,7 @@ import { CreateAcademicYearDto } from './dto/create-academic-year.dto';
 import { UpdateAcademicYearDto } from './dto/update-academic-year.dto';
 import { CreateTermDto } from './dto/create-term.dto';
 import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
+import { TermDateValidator } from './validation/term-date-validator';
 
 @Injectable()
 export class AcademicYearsService {
@@ -18,6 +19,7 @@ export class AcademicYearsService {
     @InjectRepository(ClassOffering)
     private readonly offeringRepo: Repository<ClassOffering>,
     private readonly dataSource: DataSource,
+    private readonly termDateValidator: TermDateValidator,
   ) {}
 
   async findAll(): Promise<AcademicYear[]> {
@@ -43,6 +45,25 @@ export class AcademicYearsService {
 
   async update(id: string, dto: UpdateAcademicYearDto): Promise<AcademicYear> {
     const y = await this.findOne(id);
+    
+    // If dates are being updated, validate existing terms
+    if (dto.startDate !== undefined || dto.endDate !== undefined) {
+      const newStartDate = dto.startDate ?? y.startDate;
+      const newEndDate = dto.endDate ?? y.endDate;
+      
+      const invalidTermIds = await this.termDateValidator.validateExistingTerms(
+        id,
+        newStartDate,
+        newEndDate,
+      );
+      
+      if (invalidTermIds.length > 0) {
+        throw new BadRequestException(
+          `Cannot update academic year dates: ${invalidTermIds.length} term(s) would fall outside the new date range. Invalid term IDs: ${invalidTermIds.join(', ')}`,
+        );
+      }
+    }
+    
     if (dto.label !== undefined) y.label = dto.label;
     if (dto.startDate !== undefined) y.startDate = dto.startDate;
     if (dto.endDate !== undefined) y.endDate = dto.endDate;
@@ -71,7 +92,16 @@ export class AcademicYearsService {
   }
 
   async addTerm(yearId: string, dto: CreateTermDto): Promise<Term> {
-    await this.findOne(yearId);
+    const year = await this.findOne(yearId);
+    
+    // Validate term dates fall within academic year boundaries
+    this.termDateValidator.validateTermDates(
+      dto.startDate,
+      dto.endDate,
+      year.startDate,
+      year.endDate,
+    );
+    
     const t = this.termRepo.create({
       academicYearId: yearId,
       name: dto.name,

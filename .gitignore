@@ -7,3 +7,5 @@ dist/
 data/
 uploads/
 docs/
+.kiro/
+.vscode/

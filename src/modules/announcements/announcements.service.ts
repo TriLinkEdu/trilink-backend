@@ -181,9 +181,12 @@ export class AnnouncementsService {
     return saved;
   }
 
-  async remove(id: string) {
+  async remove(id: string, viewer?: User) {
     const a = await this.repo.findOne({ where: { id } });
     if (!a) throw new NotFoundException('Not found');
+    if (viewer && viewer.role !== UserRole.ADMIN && a.authorId !== viewer.id) {
+      throw new ForbiddenException('Only the author or admin can delete this announcement');
+    }
     await this.repo.remove(a);
   }
 }

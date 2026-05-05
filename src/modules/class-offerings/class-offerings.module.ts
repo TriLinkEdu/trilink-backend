@@ -6,12 +6,13 @@ import { Grade } from '../school-structure/entities/grade.entity';
 import { Section } from '../school-structure/entities/section.entity';
 import { Subject } from '../school-structure/entities/subject.entity';
 import { ClassOfferingsService } from './class-offerings.service';
+import { BulkClassOfferingService } from './services/bulk-creation.service';
 import { ClassOfferingsController } from './class-offerings.controller';
 
 @Module({
   imports: [TypeOrmModule.forFeature([ClassOffering, User, Grade, Section, Subject])],
   controllers: [ClassOfferingsController],
-  providers: [ClassOfferingsService],
-  exports: [ClassOfferingsService],
+  providers: [ClassOfferingsService, BulkClassOfferingService],
+  exports: [ClassOfferingsService, BulkClassOfferingService],
 })
 export class ClassOfferingsModule {}

@@ -12,6 +12,10 @@ export class ConversationMember {
   @Column({ name: 'user_id', type: 'uuid' })
   userId: string;
 
+  /** 'admin' | 'member' */
+  @Column({ type: 'varchar', length: 20, default: 'member' })
+  role: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }
