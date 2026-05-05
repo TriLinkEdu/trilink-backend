@@ -55,12 +55,16 @@ class CreateConvDto {
 export class ChatController {
   constructor(private readonly chat: ChatService) {}
 
+  // ── Admin helpers ──────────────────────────────────────────────────────────
+
   @Post('admin/fix-parent-visibility')
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Admin: set parentVisible = true on all existing conversations' })
   fixParentVisibility() {
     return this.chat.setAllParentVisible();
   }
+
+  // ── Conversations ──────────────────────────────────────────────────────────
 
   @Post('conversations')
   @ApiOperation({ summary: 'Create a conversation' })
@@ -117,10 +121,12 @@ export class ChatController {
     return this.chat.updateConversation(id, user.id, dto);
   }
 
+  // ── Messages ───────────────────────────────────────────────────────────────
+
   @Get('conversations/:id/messages')
   @ApiOperation({ summary: 'List messages (cursor-paginated)' })
   @ApiParam({ name: 'id', description: 'Conversation UUID' })
-  @ApiQuery({ name: 'before', required: false })
+  @ApiQuery({ name: 'before', required: false, description: 'Cursor message UUID' })
   @ApiQuery({ name: 'limit', required: false, example: '50' })
   listMessages(
     @Param('id', ParseUUIDPipe) id: string,
@@ -193,6 +199,8 @@ export class ChatController {
     return { ok: true };
   }
 
+  // ── Members ────────────────────────────────────────────────────────────────
+
   @Get('conversations/:id/members')
   @ApiOperation({ summary: 'List conversation members' })
   @ApiParam({ name: 'id', description: 'Conversation UUID' })
@@ -225,12 +233,16 @@ export class ChatController {
     return { ok: true };
   }
 
+  // ── Media gallery ──────────────────────────────────────────────────────────
+
   @Get('conversations/:id/media')
   @ApiOperation({ summary: 'Get media gallery grouped by type' })
   @ApiParam({ name: 'id', description: 'Conversation UUID' })
   getMedia(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
     return this.chat.getMediaGallery(id, user.id);
   }
+
+  // ── Block system ───────────────────────────────────────────────────────────
 
   @Post('users/:userId/block')
   @ApiOperation({ summary: 'Block a user' })
@@ -260,6 +272,8 @@ export class ChatController {
     return this.chat.listBlocked(user.id);
   }
 
+  // ── Presence ───────────────────────────────────────────────────────────────
+
   @Get('users/presence')
   @ApiOperation({ summary: 'Get online presence for a list of users' })
   @ApiQuery({ name: 'userIds', description: 'Comma-separated user UUIDs (max 100)' })
@@ -268,6 +282,8 @@ export class ChatController {
     const ids = userIds.split(',').map((s) => s.trim()).filter(Boolean);
     return this.chat.getPresence(ids);
   }
+
+  // ── Media upload ───────────────────────────────────────────────────────────
 
   @Post('chat/upload')
   @ApiOperation({ summary: 'Upload chat media (max 50 MB)' })
@@ -279,6 +295,8 @@ export class ChatController {
   ) {
     return this.chat.uploadChatMedia(file, user.id);
   }
+
+  // ── Legacy / parent endpoints ──────────────────────────────────────────────
 
   @Get('chat/children/:studentId/conversations')
   @Roles(UserRole.PARENT)
