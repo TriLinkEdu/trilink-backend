@@ -42,6 +42,7 @@ import { LearningMaterialsModule } from './modules/learning-materials/learning-m
 import { ResourcesModule } from './modules/resources/resources.module';
 import { CurriculumModule } from './modules/curriculum/curriculum.module';
 import { TopicsModule } from './modules/topics/topics.module';
+import { SearchModule } from './modules/search/search.module';
 
 @Module({
   imports: [
@@ -97,6 +98,7 @@ import { TopicsModule } from './modules/topics/topics.module';
     LearningMaterialsModule,
     ResourcesModule,
     CurriculumModule,
+    SearchModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

@@ -11,6 +11,10 @@ import { AttendanceMark } from '../attendance/entities/attendance-mark.entity';
 import { Announcement } from '../announcements/entities/announcement.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 import { Feedback } from '../feedback/entities/feedback.entity';
+import { GradeEntry } from '../grades/entities/grade-entry.entity';
+import { Subject } from '../school-structure/entities/subject.entity';
+import { Assignment } from '../assignments/entities/assignment.entity';
+import { AssignmentSubmission } from '../assignments/entities/assignment-submission.entity';
 import { DashboardsService } from './dashboards.service';
 import { DashboardsController } from './dashboards.controller';
 
@@ -28,6 +32,10 @@ import { DashboardsController } from './dashboards.controller';
       Announcement,
       ParentStudent,
       Feedback,
+      GradeEntry,
+      Subject,
+      Assignment,
+      AssignmentSubmission,
     ]),
   ],
   controllers: [DashboardsController],

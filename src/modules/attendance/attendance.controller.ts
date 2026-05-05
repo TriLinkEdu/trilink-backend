@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -22,7 +22,7 @@ import { AttendanceService } from './attendance.service';
 
 class MarkRow {
   @ApiProperty({ description: 'Student UUID' }) @IsUUID() studentId: string;
-  @ApiProperty({ example: 'present', description: 'present | absent | excused | late' }) @IsString() status: string;
+  @ApiProperty({ example: 'present', description: 'present | absent | excused' }) @IsString() status: string;
   @ApiPropertyOptional({ description: 'Optional note for this mark' }) @IsOptional() @IsString() note?: string;
 }
 
@@ -32,6 +32,18 @@ class BulkMarksDto {
   @ValidateNested({ each: true })
   @Type(() => MarkRow)
   marks: MarkRow[];
+}
+
+class EditMarkDto {
+  @ApiPropertyOptional({ example: 'present', description: 'present | absent | excused' })
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @ApiPropertyOptional({ description: 'Optional note' })
+  @IsOptional()
+  @IsString()
+  note?: string;
 }
 
 class CreateSessionDto {
@@ -143,6 +155,24 @@ export class AttendanceController {
     return this.svc.getMarks(id);
   }
 
+  @Patch('attendance-marks/:markId')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({
+    summary: 'Edit a single attendance mark (teacher: own class only)',
+    description: 'Update the status and/or note of an individual attendance mark. Teacher must own the class the session belongs to.',
+  })
+  @ApiParam({ name: 'markId', description: 'Attendance mark UUID' })
+  @ApiResponse({ status: 200, description: 'Updated mark' })
+  @ApiResponse({ status: 403, description: 'Teacher does not own this class' })
+  @ApiResponse({ status: 404, description: 'Mark not found' })
+  editMark(
+    @Param('markId', ParseUUIDPipe) markId: string,
+    @Body() dto: EditMarkDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.editMark(markId, dto, user);
+  }
+
   // ─── Reports ──────────────────────────────────────────────────────────────
 
   @Get('reports/attendance/student/:studentId/by-day')
@@ -213,7 +243,7 @@ export class AttendanceController {
   @ApiOperation({
     summary: 'Attendance for a student filtered by subject',
     description:
-      'Returns all attendance sessions for the student in a specific subject, with per-session status and a summary (total, present, absent, late, excused, attendanceRate%). ' +
+      'Returns all attendance sessions for the student in a specific subject, with per-session status and a summary (total, present, absent, excused, attendanceRate%). ' +
       'Students can only view their own. Parents can only view their linked child. ' +
       'Use GET /enrollments/mine/subjects or GET /enrollments/children/:studentId/subjects to get subject IDs.',
   })
@@ -225,7 +255,7 @@ export class AttendanceController {
       example: {
         studentId: 'uuid', firstName: 'Ali', lastName: 'Hassan',
         subjectId: 'uuid', subjectName: 'Biology',
-        summary: { total: 20, present: 17, late: 1, absent: 2, excused: 0, attendanceRate: 90.0 },
+        summary: { total: 20, present: 17, absent: 2, excused: 1, attendanceRate: 90.0 },
         sessions: [
           {
             sessionId: 'uuid', date: '2026-04-22', status: 'present', note: null,

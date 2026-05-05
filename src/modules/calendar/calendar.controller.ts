@@ -65,9 +65,10 @@ export class CalendarController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
-  async del(@Param('id', ParseUUIDPipe) id: string) {
-    await this.svc.remove(id);
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({ summary: 'Delete event (admin: any; others: own events only)' })
+  async del(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    await this.svc.remove(id, user);
     return { ok: true };
   }
 }

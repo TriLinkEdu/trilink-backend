@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ClassOffering } from './entities/class-offering.entity';
@@ -111,7 +111,30 @@ export class ClassOfferingsService {
   }) {
     const t = await this.userRepo.findOne({ where: { id: body.teacherId } });
     if (!t || t.role !== UserRole.TEACHER) throw new BadRequestException('teacherId must be a teacher user');
-    return this.repo.save(this.repo.create(body));
+    
+    try {
+      return await this.repo.save(this.repo.create(body));
+    } catch (error) {
+      // Check if it's a unique constraint violation
+      if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+        // Fetch names for better error message
+        const [grade, section, subject] = await Promise.all([
+          this.gradeRepo.findOne({ where: { id: body.gradeId } }),
+          this.sectionRepo.findOne({ where: { id: body.sectionId } }),
+          this.subjectRepo.findOne({ where: { id: body.subjectId } }),
+        ]);
+        
+        const gradeName = grade?.name ?? 'Unknown Grade';
+        const sectionName = section?.name ?? 'Unknown Section';
+        const subjectName = subject?.name ?? 'Unknown Subject';
+        
+        throw new ConflictException(
+          `Class offering already exists for ${gradeName}, Section ${sectionName}, ${subjectName} in this academic year`,
+        );
+      }
+      // Re-throw other errors
+      throw error;
+    }
   }
 
   async update(id: string, body: Partial<Pick<ClassOffering, 'teacherId' | 'name'>>) {

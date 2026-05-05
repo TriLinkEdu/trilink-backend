@@ -96,9 +96,10 @@ export class AnnouncementsController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
-  async del(@Param('id', ParseUUIDPipe) id: string) {
-    await this.svc.remove(id);
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({ summary: 'Delete announcement (admin: any; teacher: own only)' })
+  async del(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    await this.svc.remove(id, user);
     return { ok: true };
   }
 }

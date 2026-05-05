@@ -91,6 +91,13 @@ export class User {
   @Column({ name: 'must_change_password', type: 'boolean', default: true })
   mustChangePassword: boolean;
 
+  /** Chat presence */
+  @Column({ name: 'last_seen_at', type: 'timestamp', nullable: true })
+  lastSeenAt: Date | null;
+
+  @Column({ name: 'is_online', type: 'boolean', default: false })
+  isOnline: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

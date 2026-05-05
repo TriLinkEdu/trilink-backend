@@ -5,10 +5,12 @@ import { User } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 import { FeedbackService } from './feedback.service';
 import { FeedbackController } from './feedback.controller';
+import { FeedbackFilterService } from './services/feedback-filter.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Feedback, User, ParentStudent])],
   controllers: [FeedbackController],
-  providers: [FeedbackService],
+  providers: [FeedbackService, FeedbackFilterService],
+  exports: [FeedbackService, FeedbackFilterService],
 })
 export class FeedbackModule {}
