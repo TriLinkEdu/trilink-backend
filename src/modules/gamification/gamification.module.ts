@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Badge } from './entities/badge.entity';
 import { UserBadge } from './entities/user-badge.entity';
 import { LoginStreak } from './entities/login-streak.entity';
+import { Achievement } from './entities/achievement.entity';
+import { UserAchievement } from './entities/user-achievement.entity';
 import { ExamAttempt } from '../exams/entities/exam-attempt.entity';
 import { User } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
@@ -22,6 +24,8 @@ import { GamificationController } from './gamification.controller';
     TypeOrmModule.forFeature([
       Badge,
       UserBadge,
+      Achievement,
+      UserAchievement,
       ExamAttempt,
       User,
       ParentStudent,

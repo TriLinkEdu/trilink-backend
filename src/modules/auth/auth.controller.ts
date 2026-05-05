@@ -23,6 +23,7 @@ import { User } from '../users/entities/user.entity';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { MailService } from '../mail/mail.service';
 import { AuditService } from '../audit/audit.service';
+import { GamificationService } from '../gamification/gamification.service';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -34,6 +35,7 @@ export class AuthController {
     private readonly usersService: UsersService,
     private readonly mailService: MailService,
     private readonly auditService: AuditService,
+    private readonly gamificationService: GamificationService,
   ) {}
 
   @Post('login')
@@ -243,6 +245,15 @@ export class AuthController {
   async registerByAdmin(@CurrentUser() admin: User, @Body() dto: RegisterByAdminDto) {
     const user = await this.usersService.registerByAdmin(dto);
     const tempPassword = (user as any).tempPassword as string | undefined;
+
+    // Auto-award first_steps badge for students
+    if (user.role === UserRole.STUDENT) {
+      try {
+        await this.gamificationService.awardBadgeByKeyIfMissing(user.id, 'first_steps', admin.id);
+      } catch (e) {
+        this.logger.warn('Failed to award first_steps badge', e instanceof Error ? e.message : e);
+      }
+    }
 
     let registrationEmailSent = false;
     if (this.mailService.isConfigured()) {

@@ -45,6 +45,15 @@ export class AcademicYearsController {
     return { data: a };
   }
 
+  @Get('current')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Get the current academic year (alias for active)' })
+  @ApiResponse({ status: 404, description: 'No current year' })
+  async current() {
+    return this.active();
+  }
+
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)

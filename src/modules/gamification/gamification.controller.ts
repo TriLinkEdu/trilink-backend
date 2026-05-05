@@ -159,6 +159,27 @@ export class GamificationController {
     return this.gam.listQuizzesForStudent(user);
   }
 
+  @Get('achievements')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({ summary: 'List all achievements' })
+  listAchievements() {
+    return this.gam.listAchievements();
+  }
+
+  @Get('my-achievements')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'List current user achievements' })
+  myAchievements(@CurrentUser() user: User) {
+    return this.gam.listUserAchievements(user.id);
+  }
+
+  @Post('check-achievements')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'Check and unlock new achievements' })
+  checkAchievements(@CurrentUser() user: User) {
+    return this.gam.checkAndUnlockAchievements(user.id);
+  }
+
   @Get('quizzes/:id')
   @Roles(UserRole.STUDENT)
   @ApiOperation({ summary: 'Get quiz detail for current student' })

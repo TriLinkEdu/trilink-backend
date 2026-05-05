@@ -4,11 +4,17 @@ import {
   Injectable,
   NotFoundException,
   OnModuleInit,
+  Inject,
 } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, IsNull, Not, Repository } from 'typeorm';
+import { Between, IsNull, Like, LessThan, Not, Repository } from 'typeorm';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { Badge } from './entities/badge.entity';
 import { UserBadge } from './entities/user-badge.entity';
+import { Achievement } from './entities/achievement.entity';
+import { UserAchievement } from './entities/user-achievement.entity';
 import { ExamAttempt } from '../exams/entities/exam-attempt.entity';
 import { Exam } from '../exams/entities/exam.entity';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -28,6 +34,8 @@ export class GamificationService implements OnModuleInit {
   constructor(
     @InjectRepository(Badge) private readonly badgeRepo: Repository<Badge>,
     @InjectRepository(UserBadge) private readonly ubRepo: Repository<UserBadge>,
+    @InjectRepository(Achievement) private readonly achievementRepo: Repository<Achievement>,
+    @InjectRepository(UserAchievement) private readonly userAchievementRepo: Repository<UserAchievement>,
     @InjectRepository(ExamAttempt) private readonly attRepo: Repository<ExamAttempt>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
@@ -40,6 +48,7 @@ export class GamificationService implements OnModuleInit {
     @InjectRepository(Question) private readonly questionRepo: Repository<Question>,
     @InjectRepository(Topic) private readonly topicRepo: Repository<Topic>,
     private readonly notifications: NotificationsService,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   private readonly defaultBadges: Array<{
@@ -94,6 +103,7 @@ export class GamificationService implements OnModuleInit {
       const existing = await this.badgeRepo.findOne({ where: { key: def.key } });
       if (!existing) await this.badgeRepo.save(this.badgeRepo.create(def));
     }
+    await this.ensureDefaultAchievements();
   }
 
   /** Auto-awards from exam lifecycle (called by ExamsService). */
@@ -153,7 +163,12 @@ export class GamificationService implements OnModuleInit {
     if (!badge) return false;
     const dup = await this.ubRepo.findOne({ where: { userId, badgeId: badge.id } });
     if (dup) return false;
-    await this.ubRepo.save(this.ubRepo.create({ userId, badgeId: badge.id, awardedById }));
+    await this.ubRepo.save(this.ubRepo.create({ 
+      userId, 
+      badgeId: badge.id, 
+      awardedById,
+      pointsEarned: badge.pointsValue 
+    }));
     await this.notifications.createForUser(userId, {
       type: 'badge',
       title: 'New badge',
@@ -186,49 +201,104 @@ export class GamificationService implements OnModuleInit {
     if (!badge) throw new NotFoundException('Badge not found');
     const dup = await this.ubRepo.findOne({ where: { userId, badgeId } });
     if (dup) throw new ConflictException('User already has this badge');
-    return this.ubRepo.save(this.ubRepo.create({ userId, badgeId, awardedById }));
+    return this.ubRepo.save(this.ubRepo.create({ 
+      userId, 
+      badgeId, 
+      awardedById,
+      pointsEarned: badge.pointsValue 
+    }));
   }
 
   async listUserBadges(userId: string) {
-    const rows = await this.ubRepo.find({ where: { userId }, order: { awardedAt: 'DESC' } });
-    const out = [];
-    for (const r of rows) {
-      const b = await this.badgeRepo.findOne({ where: { id: r.badgeId } });
-      out.push({ ...r, badge: b });
-    }
-    return out;
+    const rows = await this.ubRepo
+      .createQueryBuilder('ub')
+      .leftJoinAndSelect('ub.badge', 'badge')
+      .where('ub.user_id = :userId', { userId })
+      .orderBy('ub.awarded_at', 'DESC')
+      .getMany();
+    
+    return rows.map(r => ({
+      id: r.id,
+      userId: r.userId,
+      badgeId: r.badgeId,
+      awardedById: r.awardedById,
+      awardedAt: r.awardedAt,
+      badge: r.badge,
+    }));
   }
 
-  async leaderboardByExamAverage(academicYearId: string, limit = 20) {
+  async leaderboardByExamAverage(
+    academicYearId: string, 
+    limit = 20,
+    grade?: string,
+    section?: string,
+    subjectId?: string
+  ) {
+    const cacheKey = `leaderboard:exam:${academicYearId}:${grade || 'all'}:${section || 'all'}:${subjectId || 'all'}:${limit}`;
+    const cached = await this.cacheManager.get(cacheKey);
+    if (cached) return cached;
+
     const qb = this.attRepo
       .createQueryBuilder('a')
       .innerJoin('exams', 'e', 'e.id = a.exam_id')
+      .innerJoin('users', 'u', 'u.id = a.student_id')
       .select('a.student_id', 'studentId')
       .addSelect('AVG(a.score)', 'avgScore')
       .addSelect('COUNT(*)', 'examCount')
+      .addSelect('u.first_name', 'firstName')
+      .addSelect('u.last_name', 'lastName')
+      .addSelect('u.email', 'email')
+      .addSelect('u.grade', 'grade')
+      .addSelect('u.section', 'section')
       .where('e.academic_year_id = :yid', { yid: academicYearId })
       .andWhere('a.released_at IS NOT NULL')
       .andWhere('a.score IS NOT NULL')
-      .groupBy('a.student_id')
+      .andWhere('u.role = :role', { role: 'student' });
+
+    // Apply filters
+    if (grade) {
+      qb.andWhere('u.grade = :grade', { grade });
+    }
+    if (section) {
+      qb.andWhere('u.section = :section', { section });
+    }
+    if (subjectId) {
+      qb.andWhere('e.subject_id = :subjectId', { subjectId });
+    }
+
+    qb.groupBy('a.student_id')
+      .addGroupBy('u.first_name')
+      .addGroupBy('u.last_name')
+      .addGroupBy('u.email')
+      .addGroupBy('u.grade')
+      .addGroupBy('u.section')
       .orderBy('AVG(a.score)', 'DESC')
       .take(Math.min(Math.max(limit, 1), 100));
 
     const raw = await qb.getRawMany();
-    const ranked = [];
-    let rank = 1;
-    for (const row of raw) {
-      const u = await this.userRepo.findOne({ where: { id: row.studentId } });
-      ranked.push({
-        rank: rank++,
-        studentId: row.studentId,
-        averageScore: Math.round(parseFloat(row.avgScore) * 100) / 100,
-        examsCounted: parseInt(row.examCount, 10),
-        student: u
-          ? { firstName: u.firstName, lastName: u.lastName, email: u.email, grade: u.grade, section: u.section }
-          : null,
-      });
-    }
-    return { academicYearId, metric: 'averageReleasedExamScore', entries: ranked };
+    const ranked = raw.map((row, index) => ({
+      rank: index + 1,
+      studentId: row.studentId,
+      averageScore: Math.round(parseFloat(row.avgScore) * 100) / 100,
+      examsCounted: parseInt(row.examCount, 10),
+      student: {
+        firstName: row.firstName,
+        lastName: row.lastName,
+        email: row.email,
+        grade: row.grade,
+        section: row.section,
+      },
+    }));
+
+    const result = { 
+      academicYearId, 
+      metric: 'averageReleasedExamScore', 
+      filters: { grade, section, subjectId },
+      entries: ranked 
+    };
+
+    await this.cacheManager.set(cacheKey, result, 300000); // 5 minutes
+    return result;
   }
 
   async totalBadgePoints(userId: string) {
@@ -334,6 +404,10 @@ export class GamificationService implements OnModuleInit {
   }
 
   async leaderboardStreaks(limit = 20) {
+    const cacheKey = `leaderboard:streaks:${limit}`;
+    const cached = await this.cacheManager.get(cacheKey);
+    if (cached) return cached;
+
     const take = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 100) : 20;
     const rows = await this.streakRepo.find({
       order: { currentStreak: 'DESC', longestStreak: 'DESC' },
@@ -353,7 +427,9 @@ export class GamificationService implements OnModuleInit {
           : null,
       });
     }
-    return { metric: 'loginStreak', entries };
+    const result = { metric: 'loginStreak', entries };
+    await this.cacheManager.set(cacheKey, result, 300000); // 5 minutes
+    return result;
   }
 
   private isoDate(date = new Date()): string {
@@ -404,27 +480,25 @@ export class GamificationService implements OnModuleInit {
   }
 
   private async totalBadgePointsRaw(userId: string): Promise<number> {
-    const rows = await this.ubRepo.find({ where: { userId } });
-    let total = 0;
-    for (const row of rows) {
-      const badge = await this.badgeRepo.findOne({ where: { id: row.badgeId } });
-      if (badge) total += badge.pointsValue;
-    }
-    return total;
+    const result = await this.ubRepo
+      .createQueryBuilder('ub')
+      .select('COALESCE(SUM(ub.points_earned), 0)', 'total')
+      .where('ub.user_id = :userId', { userId })
+      .getRawOne();
+    return parseInt(result?.total || '0', 10);
   }
 
   private async badgeLeaderboardRank(userId: string): Promise<number | null> {
     const rows = await this.ubRepo
       .createQueryBuilder('ub')
-      .innerJoin(Badge, 'b', 'b.id = ub.badge_id')
       .innerJoin(User, 'u', 'u.id = ub.user_id')
       .select('ub.user_id', 'userId')
-      .addSelect('SUM(b.points_value)', 'points')
+      .addSelect('SUM(ub.points_earned)', 'points')
       .where('u.role = :role', { role: UserRole.STUDENT })
       .groupBy('ub.user_id')
-      .orderBy('SUM(b.points_value)', 'DESC')
+      .orderBy('SUM(ub.points_earned)', 'DESC')
       .addOrderBy('ub.user_id', 'ASC')
-      .getRawMany<{ userId: string; points: string }>();
+      .getRawMany();
 
     let rank = 1;
     for (const row of rows) {
@@ -434,9 +508,10 @@ export class GamificationService implements OnModuleInit {
     return null;
   }
 
-  async listDailyMissions(userId: string, day = this.isoDate()) {
+  async listDailyMissions(userId: string, day?: string) {
+    const actualDay = day || this.isoDate();
     const missions = this.missionTemplates();
-    const keys = missions.map((m) => this.missionBadgeKey(m.key, day));
+    const keys = missions.map((m) => this.missionBadgeKey(m.key, actualDay));
     const badges = await this.badgeRepo.find({ where: keys.map((k) => ({ key: k })) });
     const badgeMap = new Map(badges.map((b) => [b.key, b.id]));
     const badgeIds = badges.map((b) => b.id);
@@ -446,10 +521,10 @@ export class GamificationService implements OnModuleInit {
     const awardedSet = new Set(awardedRows.map((r) => r.badgeId));
 
     return missions.map((m) => {
-      const badgeId = badgeMap.get(this.missionBadgeKey(m.key, day));
+      const badgeId = badgeMap.get(this.missionBadgeKey(m.key, actualDay));
       const done = badgeId ? awardedSet.has(badgeId) : false;
       return {
-        id: this.missionId(m.key, day),
+        id: this.missionId(m.key, actualDay),
         title: m.title,
         description: m.description,
         xpReward: m.xpReward,
@@ -807,5 +882,129 @@ export class GamificationService implements OnModuleInit {
         leaderboardAfterRank: afterRank,
       },
     };
+  }
+
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async cleanupOldBadges() {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    try {
+      // Delete old mission badges
+      const missionResult = await this.badgeRepo.delete({
+        key: Like('mission_%'),
+        createdAt: LessThan(thirtyDaysAgo),
+      });
+
+      // Delete old quiz reward badges
+      const quizResult = await this.badgeRepo.delete({
+        key: Like('quiz_reward_%'),
+        createdAt: LessThan(thirtyDaysAgo),
+      });
+
+      const totalDeleted = (missionResult.affected || 0) + (quizResult.affected || 0);
+      if (totalDeleted > 0) {
+        console.log(`🧹 Badge cleanup: Deleted ${totalDeleted} old badges (${missionResult.affected || 0} missions, ${quizResult.affected || 0} quizzes)`);
+      }
+    } catch (error) {
+      console.error('❌ Badge cleanup failed:', error);
+    }
+  }
+
+  // ==================== ACHIEVEMENTS ====================
+
+  private readonly defaultAchievements = [
+    { key: 'first_login', title: 'Welcome Aboard', description: 'Log in for the first time', category: 'milestone', condition: { type: 'login_count', value: 1 } },
+    { key: 'streak_3', title: '3-Day Streak', description: 'Log in for 3 consecutive days', category: 'consistency', condition: { type: 'streak', value: 3 } },
+    { key: 'streak_7', title: 'Week Warrior', description: 'Log in for 7 consecutive days', category: 'consistency', condition: { type: 'streak', value: 7 } },
+    { key: 'streak_30', title: 'Monthly Master', description: 'Log in for 30 consecutive days', category: 'consistency', condition: { type: 'streak', value: 30 } },
+    { key: 'first_badge', title: 'Badge Collector', description: 'Earn your first badge', category: 'milestone', condition: { type: 'badge_count', value: 1 } },
+    { key: 'badges_5', title: 'Badge Enthusiast', description: 'Earn 5 badges', category: 'milestone', condition: { type: 'badge_count', value: 5 } },
+    { key: 'badges_10', title: 'Badge Master', description: 'Earn 10 badges', category: 'milestone', condition: { type: 'badge_count', value: 10 } },
+    { key: 'points_100', title: 'Century Club', description: 'Earn 100 points', category: 'milestone', condition: { type: 'points', value: 100 } },
+    { key: 'points_500', title: 'Point Powerhouse', description: 'Earn 500 points', category: 'milestone', condition: { type: 'points', value: 500 } },
+    { key: 'first_exam', title: 'Test Taker', description: 'Complete your first exam', category: 'milestone', condition: { type: 'exam_count', value: 1 } },
+    { key: 'exams_10', title: 'Exam Expert', description: 'Complete 10 exams', category: 'milestone', condition: { type: 'exam_count', value: 10 } },
+    { key: 'perfect_score', title: 'Perfectionist', description: 'Score 100% on an exam', category: 'milestone', condition: { type: 'perfect_exam', value: 1 } },
+  ];
+
+  async ensureDefaultAchievements() {
+    for (const def of this.defaultAchievements) {
+      const exists = await this.achievementRepo.findOne({ where: { key: def.key } });
+      if (!exists) {
+        await this.achievementRepo.save({
+          key: def.key,
+          title: def.title,
+          description: def.description,
+          category: def.category as any,
+          unlockCondition: def.condition,
+        });
+      }
+    }
+  }
+
+  async listAchievements() {
+    return this.achievementRepo.find({ order: { category: 'ASC', createdAt: 'ASC' } });
+  }
+
+  async listUserAchievements(userId: string) {
+    return this.userAchievementRepo.find({
+      where: { userId },
+      relations: ['achievement'],
+      order: { unlockedAt: 'DESC' },
+    });
+  }
+
+  async checkAndUnlockAchievements(userId: string) {
+    const achievements = await this.achievementRepo.find();
+    const unlocked = await this.userAchievementRepo.find({ where: { userId } });
+    const unlockedIds = new Set(unlocked.map(u => u.achievementId));
+    const newlyUnlocked: Achievement[] = [];
+
+    for (const achievement of achievements) {
+      if (unlockedIds.has(achievement.id)) continue;
+
+      const condition = achievement.unlockCondition;
+      let met = false;
+
+      switch (condition.type) {
+        case 'login_count':
+          const loginCount = await this.streakRepo.count({ where: { userId } });
+          met = loginCount >= condition.value;
+          break;
+        case 'streak':
+          const streak = await this.streakRepo.findOne({ where: { userId } });
+          met = !!(streak && streak.currentStreak >= condition.value);
+          break;
+        case 'badge_count':
+          const badgeCount = await this.ubRepo.count({ where: { userId } });
+          met = badgeCount >= condition.value;
+          break;
+        case 'points':
+          const points = await this.totalBadgePointsRaw(userId);
+          met = points >= condition.value;
+          break;
+        case 'exam_count':
+          const examCount = await this.attRepo.count({ where: { studentId: userId, releasedAt: Not(IsNull()) } });
+          met = examCount >= condition.value;
+          break;
+        case 'perfect_exam':
+          const perfectExam = await this.attRepo.findOne({ where: { studentId: userId, score: 100, releasedAt: Not(IsNull()) } });
+          met = !!perfectExam;
+          break;
+      }
+
+      if (met) {
+        await this.userAchievementRepo.save({ userId, achievementId: achievement.id });
+        newlyUnlocked.push(achievement);
+        await this.notifications.createForUser(userId, {
+          title: `Achievement Unlocked: ${achievement.title}`,
+          body: achievement.description || '',
+          type: 'achievement',
+        });
+      }
+    }
+
+    return newlyUnlocked;
   }
 }
