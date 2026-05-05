@@ -356,7 +356,7 @@ export class ChatController {
   // ── Blocking ──
   @Post('blocked-users')
   @ApiOperation({ summary: 'Block a user' })
-  blockUser(
+  blockUserLegacy(
     @Body('blockedId', ParseUUIDPipe) blockedId: string,
     @CurrentUser() user: User,
   ) {
@@ -365,7 +365,7 @@ export class ChatController {
 
   @Delete('blocked-users/:id')
   @ApiOperation({ summary: 'Unblock a user' })
-  unblockUser(
+  unblockUserLegacy(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: User,
   ) {

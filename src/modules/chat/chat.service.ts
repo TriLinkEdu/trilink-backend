@@ -987,18 +987,6 @@ export class ChatService {
   }
 
   // ── Blocking ──
-  async blockUser(blockerId: string, blockedId: string) {
-    const existing = await this.blockRepo.findOne({ where: { blockerId, blockedId } });
-    if (existing) return existing;
-    const block = this.blockRepo.create({ blockerId, blockedId });
-    return this.blockRepo.save(block);
-  }
-
-  async unblockUser(blockerId: string, blockedId: string) {
-    await this.blockRepo.delete({ blockerId, blockedId });
-    return { ok: true };
-  }
-
   async getBlockedUsers(userId: string) {
     return this.blockRepo.find({ where: { blockerId: userId } });
   }
