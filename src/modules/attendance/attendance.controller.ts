@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -32,6 +32,18 @@ class BulkMarksDto {
   @ValidateNested({ each: true })
   @Type(() => MarkRow)
   marks: MarkRow[];
+}
+
+class EditMarkDto {
+  @ApiPropertyOptional({ example: 'present', description: 'present | absent | excused' })
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @ApiPropertyOptional({ description: 'Optional note' })
+  @IsOptional()
+  @IsString()
+  note?: string;
 }
 
 class CreateSessionDto {
@@ -141,6 +153,24 @@ export class AttendanceController {
   @ApiResponse({ status: 404, description: 'Session not found' })
   getMarks(@Param('id', ParseUUIDPipe) id: string) {
     return this.svc.getMarks(id);
+  }
+
+  @Patch('attendance-marks/:markId')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({
+    summary: 'Edit a single attendance mark (teacher: own class only)',
+    description: 'Update the status and/or note of an individual attendance mark. Teacher must own the class the session belongs to.',
+  })
+  @ApiParam({ name: 'markId', description: 'Attendance mark UUID' })
+  @ApiResponse({ status: 200, description: 'Updated mark' })
+  @ApiResponse({ status: 403, description: 'Teacher does not own this class' })
+  @ApiResponse({ status: 404, description: 'Mark not found' })
+  editMark(
+    @Param('markId', ParseUUIDPipe) markId: string,
+    @Body() dto: EditMarkDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.editMark(markId, dto, user);
   }
 
   // ─── Reports ──────────────────────────────────────────────────────────────

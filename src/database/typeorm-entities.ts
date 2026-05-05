@@ -4,6 +4,8 @@ import { Term } from '../modules/academic-years/entities/term.entity';
 import { Grade } from '../modules/school-structure/entities/grade.entity';
 import { Section } from '../modules/school-structure/entities/section.entity';
 import { Subject } from '../modules/school-structure/entities/subject.entity';
+import { GradeSectionAssignment } from '../modules/school-structure/entities/grade-section-assignment.entity';
+import { GradeSubjectAssignment } from '../modules/school-structure/entities/grade-subject-assignment.entity';
 import { ClassOffering } from '../modules/class-offerings/entities/class-offering.entity';
 import { Enrollment } from '../modules/enrollments/entities/enrollment.entity';
 import { ParentStudent } from '../modules/parent-students/entities/parent-student.entity';
@@ -20,6 +22,8 @@ import { Notification } from '../modules/notifications/entities/notification.ent
 import { Conversation } from '../modules/chat/entities/conversation.entity';
 import { ConversationMember } from '../modules/chat/entities/conversation-member.entity';
 import { ChatMessage } from '../modules/chat/entities/chat-message.entity';
+import { ConversationRead } from '../modules/chat/entities/conversation-read.entity';
+import { UserBlock } from '../modules/chat/entities/user-block.entity';
 import { UserSettings } from '../modules/settings/entities/user-settings.entity';
 import { SchoolSettings } from '../modules/settings/entities/school-settings.entity';
 import { FileRecord } from '../modules/files/entities/file-record.entity';
@@ -44,6 +48,8 @@ export const TYPEORM_ENTITIES = [
   Grade,
   Section,
   Subject,
+  GradeSectionAssignment,
+  GradeSubjectAssignment,
   ClassOffering,
   Enrollment,
   ParentStudent,
@@ -60,6 +66,8 @@ export const TYPEORM_ENTITIES = [
   Conversation,
   ConversationMember,
   ChatMessage,
+  ConversationRead,
+  UserBlock,
   UserSettings,
   SchoolSettings,
   FileRecord,

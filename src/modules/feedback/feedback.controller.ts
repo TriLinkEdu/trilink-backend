@@ -17,6 +17,7 @@ import { UserRole } from '../users/entities/user.entity';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { FeedbackService } from './feedback.service';
+import { FeedbackFilterService } from './services/feedback-filter.service';
 import { FeedbackType, FeedbackSenderRole } from './entities/feedback.entity';
 
 class FCreate {
@@ -72,7 +73,10 @@ class FPatch {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth('JWT')
 export class FeedbackController {
-  constructor(private readonly svc: FeedbackService) {}
+  constructor(
+    private readonly svc: FeedbackService,
+    private readonly filterService: FeedbackFilterService,
+  ) {}
 
   @Post()
   @Roles(UserRole.STUDENT, UserRole.PARENT, UserRole.TEACHER)
@@ -176,19 +180,41 @@ export class FeedbackController {
     description:
       'Returns all feedback with optional filters. Author identity is hidden when `isAnonymous = true`. ' +
       'Use `senderRole` to filter by who sent it (e.g. `teacher` to see all teacher→school feedback). ' +
-      'Use `category` to filter by type.',
+      'Use `category` to filter by type. ' +
+      'Additional filters: grade, section, dateFrom, dateTo for advanced filtering.',
   })
   @ApiQuery({ name: 'subjectId', required: false, description: 'Filter by subject UUID' })
   @ApiQuery({ name: 'teacherId', required: false, description: 'Filter by target teacher UUID' })
   @ApiQuery({ name: 'senderRole', required: false, enum: FeedbackSenderRole, description: 'Filter by sender role (student | parent | teacher)' })
   @ApiQuery({ name: 'category', required: false, enum: FeedbackType, description: 'Filter by feedback category (teacher | school | general)' })
+  @ApiQuery({ name: 'grade', required: false, description: 'Filter by submitter grade' })
+  @ApiQuery({ name: 'section', required: false, description: 'Filter by submitter section' })
+  @ApiQuery({ name: 'dateFrom', required: false, description: 'Filter by date from (ISO 8601 format)' })
+  @ApiQuery({ name: 'dateTo', required: false, description: 'Filter by date to (ISO 8601 format)' })
   @ApiResponse({ status: 200, description: 'Filtered feedback list' })
-  list(
+  async list(
     @Query('subjectId', new ParseUUIDPipe({ optional: true })) subjectId?: string,
     @Query('teacherId', new ParseUUIDPipe({ optional: true })) teacherId?: string,
     @Query('senderRole') senderRole?: FeedbackSenderRole,
     @Query('category') category?: FeedbackType,
+    @Query('grade') grade?: string,
+    @Query('section') section?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
   ) {
+    // If advanced filters are provided, use the filter service
+    if (grade || section || dateFrom || dateTo) {
+      return this.filterService.filterFeedback({
+        grade,
+        section,
+        dateFrom,
+        dateTo,
+        category,
+        senderRole,
+      });
+    }
+
+    // Otherwise, use the basic list method
     return this.svc.list({ subjectId, teacherId, senderRole, category });
   }
 

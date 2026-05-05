@@ -1,0 +1,362 @@
+# Bulk Creation Implementation - Code to Add
+
+## 1. After line 95 (after existing state declarations), add these new states:
+
+  // Bulk creation modal state
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkForm, setBulkForm] = useState({
+    gradeId: "",
+    teacherId: "",
+    selectedSections: [] as string[],
+    selectedSubjects: [] as string[],
+  });
+  const [loadingBulkCreate, setLoadingBulkCreate] = useState(false);
+
+## 2. After the handleCreate function (around line 230), add these handler functions:
+
+  const openBulkCreate = () => {
+    setBulkForm({
+      gradeId: grades[0]?.id ?? "",
+      teacherId: teachers[0]?.id ?? "",
+      selectedSections: [],
+      selectedSubjects: [],
+    });
+    setShowBulkModal(true);
+  };
+
+  const handleBulkCreate = async () => {
+    if (!yearId) {
+      showT("Select an academic year first.");
+      return;
+    }
+    if (!bulkForm.gradeId || !bulkForm.teacherId) {
+      showT("Select grade and teacher.");
+      return;
+    }
+    if (bulkForm.selectedSections.length === 0) {
+      showT("Select at least one section.");
+      return;
+    }
+    if (bulkForm.selectedSubjects.length === 0) {
+      showT("Select at least one subject.");
+      return;
+    }
+
+    setLoadingBulkCreate(true);
+    try {
+      const result = await bulkCreateClassOfferings({
+        academicYearId: yearId,
+        gradeId: bulkForm.gradeId,
+        sectionIds: bulkForm.selectedSections,
+        subjectIds: bulkForm.selectedSubjects,
+        teacherId: bulkForm.teacherId,
+      });
+      
+      setShowBulkModal(false);
+      await loadOfferings(yearId);
+      
+      if (result.skipped > 0) {
+        showT(`Created ${result.created} offerings, skipped ${result.skipped} duplicates.`);
+      } else {
+        showT(`Successfully created ${result.created} class offerings!`);
+      }
+    } catch (e) {
+      showT(e instanceof Error ? e.message : "Bulk create failed");
+    } finally {
+      setLoadingBulkCreate(false);
+    }
+  };
+
+  const toggleSection = (sectionId: string) => {
+    setBulkForm((prev) => ({
+      ...prev,
+      selectedSections: prev.selectedSections.includes(sectionId)
+        ? prev.selectedSections.filter((id) => id !== sectionId)
+        : [...prev.selectedSections, sectionId],
+    }));
+  };
+
+  const toggleSubject = (subjectId: string) => {
+    setBulkForm((prev) => ({
+      ...prev,
+      selectedSubjects: prev.selectedSubjects.includes(subjectId)
+        ? prev.selectedSubjects.filter((id) => id !== subjectId)
+        : [...prev.selectedSubjects, subjectId],
+    }));
+  };
+
+  const selectAllSections = () => {
+    setBulkForm((prev) => ({
+      ...prev,
+      selectedSections: sections.map((s) => s.id),
+    }));
+  };
+
+  const deselectAllSections = () => {
+    setBulkForm((prev) => ({
+      ...prev,
+      selectedSections: [],
+    }));
+  };
+
+  const selectAllSubjects = () => {
+    setBulkForm((prev) => ({
+      ...prev,
+      selectedSubjects: subjects.map((s) => s.id),
+    }));
+  };
+
+  const deselectAllSubjects = () => {
+    setBulkForm((prev) => ({
+      ...prev,
+      selectedSubjects: [],
+    }));
+  };
+
+## 3. Replace the header button section (around line 310) with:
+
+      <div style={{ display: "flex", gap: "0.75rem" }}>
+        <button type="button" className="btn btn-secondary" onClick={openCreate} disabled={!yearId}>
+          + Single offering
+        </button>
+        <button type="button" className="btn btn-primary" onClick={openBulkCreate} disabled={!yearId}>
+          + Bulk create
+        </button>
+      </div>
+
+## 4. Add the bulk modal before the closing </div> at the end (before line 502):
+
+      {showBulkModal && (
+        <div className="modal-overlay" style={{ zIndex: 9998, padding: "1rem" }}>
+          <div className="modal" style={{ maxWidth: 680, width: "100%", padding: "2rem", maxHeight: "90vh", overflowY: "auto" }}>
+            <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "0.5rem" }}>Bulk create class offerings</h2>
+            <p style={{ fontSize: "0.9rem", color: "var(--gray-600)", marginBottom: "1.5rem" }}>
+              Select a teacher, grade, multiple sections, and multiple subjects. All combinations will be created.
+            </p>
+
+            <div style={{ display: "grid", gap: "1.25rem" }}>
+              {/* Teacher Selection */}
+              <label>
+                <span style={{ fontWeight: 600, display: "block", marginBottom: "0.5rem" }}>Teacher *</span>
+                <Select
+                  value={bulkForm.teacherId}
+                  onChange={(e) => setBulkForm((f) => ({ ...f, teacherId: e.target.value }))}
+                  style={{
+                    width: "100%",
+                    padding: "0.6rem 1rem",
+                    borderRadius: "20px",
+                    border: "1px solid var(--primary-200)",
+                    background: "var(--primary-50)",
+                    color: "var(--primary-800)",
+                    outline: "none",
+                  }}
+                >
+                  {teachers.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.firstName} {t.lastName} ({t.email})
+                    </option>
+                  ))}
+                </Select>
+              </label>
+
+              {/* Grade Selection */}
+              <label>
+                <span style={{ fontWeight: 600, display: "block", marginBottom: "0.5rem" }}>Grade *</span>
+                <Select
+                  value={bulkForm.gradeId}
+                  onChange={(e) => setBulkForm((f) => ({ ...f, gradeId: e.target.value }))}
+                  style={{
+                    width: "100%",
+                    padding: "0.6rem 1rem",
+                    borderRadius: "20px",
+                    border: "1px solid var(--primary-200)",
+                    background: "var(--primary-50)",
+                    color: "var(--primary-800)",
+                    outline: "none",
+                  }}
+                >
+                  {grades.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+
+              {/* Sections Selection */}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                  <span style={{ fontWeight: 600 }}>Sections * ({bulkForm.selectedSections.length} selected)</span>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: "0.75rem", padding: "0.25rem 0.5rem" }}
+                      onClick={selectAllSections}
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: "0.75rem", padding: "0.25rem 0.5rem" }}
+                      onClick={deselectAllSections}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+                    gap: "0.5rem",
+                    padding: "1rem",
+                    background: "var(--gray-50)",
+                    borderRadius: "12px",
+                    border: "1px solid var(--gray-200)",
+                  }}
+                >
+                  {sections.length === 0 ? (
+                    <p style={{ color: "var(--gray-500)", fontSize: "0.9rem" }}>No sections available. Create sections in School Setup.</p>
+                  ) : (
+                    sections.map((s) => (
+                      <label
+                        key={s.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                          cursor: "pointer",
+                          padding: "0.5rem",
+                          borderRadius: "8px",
+                          background: bulkForm.selectedSections.includes(s.id) ? "var(--primary-100)" : "transparent",
+                          border: bulkForm.selectedSections.includes(s.id) ? "1px solid var(--primary-300)" : "1px solid transparent",
+                          transition: "all 0.2s",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={bulkForm.selectedSections.includes(s.id)}
+                          onChange={() => toggleSection(s.id)}
+                          style={{ cursor: "pointer" }}
+                        />
+                        <span style={{ fontSize: "0.9rem", fontWeight: bulkForm.selectedSections.includes(s.id) ? 600 : 400 }}>
+                          {s.name}
+                        </span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Subjects Selection */}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                  <span style={{ fontWeight: 600 }}>Subjects * ({bulkForm.selectedSubjects.length} selected)</span>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: "0.75rem", padding: "0.25rem 0.5rem" }}
+                      onClick={selectAllSubjects}
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: "0.75rem", padding: "0.25rem 0.5rem" }}
+                      onClick={deselectAllSubjects}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+                    gap: "0.5rem",
+                    padding: "1rem",
+                    background: "var(--gray-50)",
+                    borderRadius: "12px",
+                    border: "1px solid var(--gray-200)",
+                    maxHeight: "300px",
+                    overflowY: "auto",
+                  }}
+                >
+                  {subjects.length === 0 ? (
+                    <p style={{ color: "var(--gray-500)", fontSize: "0.9rem" }}>No subjects available. Create subjects in School Setup.</p>
+                  ) : (
+                    subjects.map((s) => (
+                      <label
+                        key={s.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                          cursor: "pointer",
+                          padding: "0.5rem",
+                          borderRadius: "8px",
+                          background: bulkForm.selectedSubjects.includes(s.id) ? "var(--primary-100)" : "transparent",
+                          border: bulkForm.selectedSubjects.includes(s.id) ? "1px solid var(--primary-300)" : "1px solid transparent",
+                          transition: "all 0.2s",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={bulkForm.selectedSubjects.includes(s.id)}
+                          onChange={() => toggleSubject(s.id)}
+                          style={{ cursor: "pointer" }}
+                        />
+                        <span style={{ fontSize: "0.9rem", fontWeight: bulkForm.selectedSubjects.includes(s.id) ? 600 : 400 }}>
+                          {s.name} {s.code ? `(${s.code})` : ""}
+                        </span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Summary */}
+              {bulkForm.selectedSections.length > 0 && bulkForm.selectedSubjects.length > 0 && (
+                <div
+                  style={{
+                    padding: "1rem",
+                    background: "var(--success-50)",
+                    border: "1px solid var(--success-200)",
+                    borderRadius: "12px",
+                  }}
+                >
+                  <p style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--success-800)" }}>
+                    Will create {bulkForm.selectedSections.length × bulkForm.selectedSubjects.length} class offerings
+                  </p>
+                  <p style={{ fontSize: "0.85rem", color: "var(--success-700)", marginTop: "0.25rem" }}>
+                    {bulkForm.selectedSections.length} sections × {bulkForm.selectedSubjects.length} subjects
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: "0.75rem", marginTop: "1.5rem", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowBulkModal(false)}
+                disabled={loadingBulkCreate}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleBulkCreate}
+                disabled={loadingBulkCreate || bulkForm.selectedSections.length === 0 || bulkForm.selectedSubjects.length === 0}
+              >
+                {loadingBulkCreate ? "Creating..." : "Create all offerings"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}

@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsArray, IsOptional, IsString, IsUUID } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -21,6 +21,7 @@ import { UserRole } from '../users/entities/user.entity';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { ClassOfferingsService } from './class-offerings.service';
+import { BulkClassOfferingService, BulkCreationRequest } from './services/bulk-creation.service';
 
 class CreateOfferingDto {
   @ApiProperty() @IsUUID() academicYearId: string;
@@ -31,12 +32,23 @@ class CreateOfferingDto {
   @ApiPropertyOptional() @IsOptional() @IsString() name?: string;
 }
 
+class BulkCreateOfferingDto implements BulkCreationRequest {
+  @ApiProperty() @IsUUID() academicYearId: string;
+  @ApiProperty() @IsUUID() gradeId: string;
+  @ApiProperty({ type: [String] }) @IsArray() @IsUUID('4', { each: true }) sectionIds: string[];
+  @ApiProperty({ type: [String] }) @IsArray() @IsUUID('4', { each: true }) subjectIds: string[];
+  @ApiProperty() @IsUUID() teacherId: string;
+}
+
 @ApiTags('Classes')
 @Controller('class-offerings')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth('JWT')
 export class ClassOfferingsController {
-  constructor(private readonly svc: ClassOfferingsService) {}
+  constructor(
+    private readonly svc: ClassOfferingsService,
+    private readonly bulkSvc: BulkClassOfferingService,
+  ) {}
 
   @Get('mine')
   @Roles(UserRole.TEACHER, UserRole.ADMIN)
@@ -84,6 +96,16 @@ export class ClassOfferingsController {
   @Roles(UserRole.ADMIN)
   create(@Body() dto: CreateOfferingDto) {
     return this.svc.create(dto);
+  }
+
+  @Post('bulk')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Bulk create class offerings',
+    description: 'Create multiple class offerings for selected sections and subjects in a single request',
+  })
+  bulkCreate(@Body() dto: BulkCreateOfferingDto) {
+    return this.bulkSvc.bulkCreate(dto);
   }
 
   @Patch(':id')

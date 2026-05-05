@@ -4,9 +4,11 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 
 @Entity('class_offerings')
+@Index(['academicYearId', 'gradeId', 'sectionId', 'subjectId'], { unique: true })
 export class ClassOffering {
   @PrimaryGeneratedColumn('uuid')
   id: string;

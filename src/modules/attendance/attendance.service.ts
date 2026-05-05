@@ -178,6 +178,31 @@ export class AttendanceService {
     return this.markRepo.find({ where: { sessionId } });
   }
 
+  async editMark(
+    markId: string,
+    body: { status?: string; note?: string },
+    viewer: User,
+  ) {
+    const mark = await this.markRepo.findOne({ where: { id: markId } });
+    if (!mark) throw new NotFoundException('Mark not found');
+
+    const session = await this.sessRepo.findOne({ where: { id: mark.sessionId } });
+    if (!session) throw new NotFoundException('Session not found');
+
+    await this.assertTeacherOwnsClass(viewer, session.classOfferingId);
+
+    const validStatuses = new Set(['present', 'absent', 'excused']);
+    if (body.status !== undefined) {
+      if (!validStatuses.has(body.status)) {
+        throw new BadRequestException(`Invalid status "${body.status}". Allowed: present, absent, excused`);
+      }
+      mark.status = body.status;
+    }
+    if (body.note !== undefined) mark.note = body.note ?? null;
+
+    return this.markRepo.save(mark);
+  }
+
   // ─── Reports ──────────────────────────────────────────────────────────────
 
   /** Resolve a student's basic profile fields. */

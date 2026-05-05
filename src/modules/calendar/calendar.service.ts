@@ -102,9 +102,12 @@ export class CalendarService {
     return this.repo.save(e);
   }
 
-  async remove(id: string) {
+  async remove(id: string, viewer?: User) {
     const e = await this.repo.findOne({ where: { id } });
     if (!e) throw new NotFoundException('Event not found');
+    if (viewer && viewer.role !== UserRole.ADMIN && e.createdById !== viewer.id) {
+      throw new ForbiddenException('You can only delete your own events');
+    }
     await this.repo.remove(e);
   }
 }
