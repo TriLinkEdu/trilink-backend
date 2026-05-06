@@ -81,6 +81,19 @@ The project uses Docker volumes to ensure that profile pictures and media assets
 
 ---
 
+## Stabilization Notes
+
+The current stabilized backend build passes with the existing NestJS routes. The web client should use the canonical exam attempt routes under `/api/attempts/:id/...` for answers, submission, grading, result loading, violations, and teacher controls.
+
+Deferred backend work:
+- S3 storage is registered but not implemented; keep `RESOURCE_STORAGE_DRIVER=cloudinary` unless the S3 provider is completed.
+- AI routes require `AI_SERVICE_URL` for real AI behavior; without it, selected AI endpoints return explicit fallback/stub responses.
+- Student sync endpoints currently return lightweight status placeholders, not a full sync engine.
+- Production database migrations are not present yet; production should not rely on TypeORM `synchronize`.
+- Chat read receipts are conservative placeholders and should be replaced with per-user read tracking when needed.
+
+---
+
 ## 🤝 Folder Structure
 
 ```text
