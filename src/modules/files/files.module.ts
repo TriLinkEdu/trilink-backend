@@ -5,6 +5,7 @@ import { FilesService } from './files.service';
 import { FilesController } from './files.controller';
 import { UsersModule } from '../users/users.module';
 import { CloudinaryStorageProvider } from './storage/cloudinary-storage.provider';
+import { S3StorageProvider } from './storage/s3-storage.provider';
 import { RESOURCE_STORAGE_PROVIDER } from './storage/resource-storage.provider';
 
 @Module({
@@ -13,16 +14,16 @@ import { RESOURCE_STORAGE_PROVIDER } from './storage/resource-storage.provider';
   providers: [
     FilesService,
     CloudinaryStorageProvider,
+    S3StorageProvider,
     {
       provide: RESOURCE_STORAGE_PROVIDER,
-      useFactory: (cloudinaryProvider: CloudinaryStorageProvider) => {
+      useFactory: (cloudinaryProvider: CloudinaryStorageProvider, s3Provider: S3StorageProvider) => {
         const driver = (process.env.RESOURCE_STORAGE_DRIVER || 'cloudinary').toLowerCase();
-        if (driver !== 'cloudinary') {
-          throw new Error(`Unsupported RESOURCE_STORAGE_DRIVER="${driver}". Only "cloudinary" is currently available.`);
-        }
+        if (driver === 's3') return s3Provider;
+        if (driver !== 'cloudinary') throw new Error(`Unsupported RESOURCE_STORAGE_DRIVER="${driver}"`);
         return cloudinaryProvider;
       },
-      inject: [CloudinaryStorageProvider],
+      inject: [CloudinaryStorageProvider, S3StorageProvider],
     },
   ],
   exports: [FilesService, RESOURCE_STORAGE_PROVIDER],

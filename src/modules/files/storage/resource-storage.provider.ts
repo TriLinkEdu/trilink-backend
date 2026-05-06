@@ -1,6 +1,6 @@
 export const RESOURCE_STORAGE_PROVIDER = 'RESOURCE_STORAGE_PROVIDER';
 
-export type StorageDriver = 'cloudinary';
+export type StorageDriver = 'cloudinary' | 's3';
 
 export interface StoredObjectResult {
   storageProvider: StorageDriver;
