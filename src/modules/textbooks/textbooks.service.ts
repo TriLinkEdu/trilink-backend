@@ -81,7 +81,11 @@ export class TextbooksService {
     });
 
     const saved = await this.repo.save(textbook);
-    return this.toDto(saved);
+    const withRelations = await this.repo.findOne({
+      where: { id: saved.id },
+      relations: ['fileRecord', 'coverImageFile'],
+    });
+    return this.toDto(withRelations || saved);
   }
 
   /* ── List ───────────────────────────────────────────────── */
