@@ -17,14 +17,10 @@ import { RESOURCE_STORAGE_PROVIDER } from './storage/resource-storage.provider';
     S3StorageProvider,
     {
       provide: RESOURCE_STORAGE_PROVIDER,
-      useFactory: (
-        cloudinaryProvider: CloudinaryStorageProvider,
-        s3Provider: S3StorageProvider,
-      ) => {
+      useFactory: (cloudinaryProvider: CloudinaryStorageProvider, s3Provider: S3StorageProvider) => {
         const driver = (process.env.RESOURCE_STORAGE_DRIVER || 'cloudinary').toLowerCase();
-        if (driver === 's3') {
-          return s3Provider;
-        }
+        if (driver === 's3') return s3Provider;
+        if (driver !== 'cloudinary') throw new Error(`Unsupported RESOURCE_STORAGE_DRIVER="${driver}"`);
         return cloudinaryProvider;
       },
       inject: [CloudinaryStorageProvider, S3StorageProvider],
