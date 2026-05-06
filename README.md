@@ -100,7 +100,7 @@ The project uses Docker volumes to ensure that profile pictures and media assets
 The current stabilized backend build passes with the existing NestJS routes. The web client should use the canonical exam attempt routes under `/api/attempts/:id/...` for answers, submission, grading, result loading, violations, and teacher controls.
 
 Deferred backend work:
-- S3 storage is registered but not implemented; keep `RESOURCE_STORAGE_DRIVER=cloudinary` unless the S3 provider is completed.
+- Resource storage currently supports Cloudinary only; `RESOURCE_STORAGE_DRIVER` must stay `cloudinary` until a real S3 provider and dependencies are added.
 - AI routes require `AI_SERVICE_URL` for real AI behavior; without it, selected AI endpoints return explicit `not_configured` responses instead of sample AI content.
 - Student sync endpoints return DB-backed status for notifications, released grades, attendance marks, and exam result release state.
 - Production database migrations are not present yet; production should not rely on TypeORM `synchronize`.
