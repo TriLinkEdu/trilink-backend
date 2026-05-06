@@ -18,6 +18,7 @@ import { Section } from '../school-structure/entities/section.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { GamificationService } from '../gamification/gamification.service';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class AttendanceService {
@@ -33,6 +34,7 @@ export class AttendanceService {
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     private readonly notifications: NotificationsService,
     private readonly gamification: GamificationService,
+    private readonly audit: AuditService,
   ) {}
 
   // ─── Access guards ────────────────────────────────────────────────────────
@@ -147,11 +149,26 @@ export class AttendanceService {
       if (!validStatuses.has(m.status)) throw new BadRequestException(`Invalid status "${m.status}". Allowed: present, absent, excused`);
       const existing = await this.markRepo.findOne({ where: { sessionId, studentId: m.studentId } });
       if (existing) {
+        const before = { status: existing.status, note: existing.note ?? null };
         existing.status = m.status;
         existing.note = m.note ?? null;
-        await this.markRepo.save(existing);
+        const saved = await this.markRepo.save(existing);
+        await this.audit.log(
+          viewer.id,
+          viewer.role === UserRole.ADMIN ? 'attendance.mark_admin_override' : 'attendance.mark_update',
+          'attendance_mark',
+          saved.id,
+          JSON.stringify({ sessionId, studentId: m.studentId, before, after: { status: saved.status, note: saved.note ?? null } }),
+        );
       } else {
-        await this.markRepo.save(this.markRepo.create({ sessionId, studentId: m.studentId, status: m.status, note: m.note ?? null }));
+        const saved = await this.markRepo.save(this.markRepo.create({ sessionId, studentId: m.studentId, status: m.status, note: m.note ?? null }));
+        await this.audit.log(
+          viewer.id,
+          'attendance.mark_create',
+          'attendance_mark',
+          saved.id,
+          JSON.stringify({ sessionId, studentId: m.studentId, status: saved.status, note: saved.note ?? null }),
+        );
       }
     }
 
@@ -192,6 +209,7 @@ export class AttendanceService {
     await this.assertTeacherOwnsClass(viewer, session.classOfferingId);
 
     const validStatuses = new Set(['present', 'absent', 'excused']);
+    const before = { status: mark.status, note: mark.note ?? null };
     if (body.status !== undefined) {
       if (!validStatuses.has(body.status)) {
         throw new BadRequestException(`Invalid status "${body.status}". Allowed: present, absent, excused`);
@@ -200,7 +218,15 @@ export class AttendanceService {
     }
     if (body.note !== undefined) mark.note = body.note ?? null;
 
-    return this.markRepo.save(mark);
+    const saved = await this.markRepo.save(mark);
+    await this.audit.log(
+      viewer.id,
+      viewer.role === UserRole.ADMIN ? 'attendance.mark_admin_override' : 'attendance.mark_update',
+      'attendance_mark',
+      saved.id,
+      JSON.stringify({ sessionId: session.id, studentId: saved.studentId, before, after: { status: saved.status, note: saved.note ?? null } }),
+    );
+    return saved;
   }
 
   // ─── Reports ──────────────────────────────────────────────────────────────
