@@ -146,8 +146,9 @@ export class AiService {
     const aiUrl = this.aiBaseUrl();
     if (!aiUrl) {
       return {
-        studentId, source: 'stub',
-        items: [{ type: 'resource', title: 'Sample: Algebra fundamentals', reason: 'AI service not configured.', url: null }],
+        studentId, source: 'not_configured',
+        items: [],
+        message: 'AI service is not configured. Set AI_SERVICE_URL to enable recommendations.',
         generatedAt: new Date().toISOString(),
         displayName: u ? `${u.firstName} ${u.lastName}` : null,
       };
@@ -192,11 +193,10 @@ export class AiService {
     const aiUrl = this.aiBaseUrl();
     if (!aiUrl) {
       return {
-        studentId, source: 'stub',
-        weeks: [
-          { weekIndex: 1, focus: 'Review fractions', milestones: ['Diagnostic quiz', 'Short practice'] },
-          { weekIndex: 2, focus: 'Linear equations', milestones: ['Video + worksheet'] },
-        ],
+        studentId, source: 'not_configured',
+        weeks: [],
+        topics: [],
+        message: 'AI service is not configured. Set AI_SERVICE_URL to enable learning paths.',
         generatedAt: new Date().toISOString(),
       };
     }
@@ -254,7 +254,7 @@ export class AiService {
 
     const aiUrl = this.aiBaseUrl();
     if (!aiUrl) {
-      return { source: 'stub', student_id: dto.student_id, message: dto.message, answer: 'AI service is not configured. Set AI_SERVICE_URL.', sources: [] };
+      return { source: 'not_configured', student_id: dto.student_id, message: dto.message, answer: null, sources: [], error: 'AI service is not configured. Set AI_SERVICE_URL.' };
     }
 
     return this.fetchAi('/api/ai/chat', {
@@ -354,7 +354,7 @@ export class AiService {
   async feedbackAssistant(body: { context: string; audience?: string }, viewer: User) {
     const aiUrl = this.aiBaseUrl();
     if (!aiUrl) {
-      return { source: 'stub', suggestion: 'Wire POST body to your Python service; return structured tone checks and bullet suggestions.', inputEcho: body.context.slice(0, 200), audience: body.audience ?? 'teacher' };
+      return { source: 'not_configured', suggestion: null, inputEcho: body.context.slice(0, 200), audience: body.audience ?? 'teacher', error: 'AI service is not configured. Set AI_SERVICE_URL.' };
     }
 
     const chat = await this.fetchAi<{ answer?: string; sources?: unknown[] }>('/api/ai/chat', {

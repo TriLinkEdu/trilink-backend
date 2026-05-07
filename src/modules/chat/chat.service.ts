@@ -100,6 +100,15 @@ export interface MediaUploadResult {
   mediaType: string;
 }
 
+export interface MessageReadReceipt {
+  messageId: string;
+  userId: string;
+  readAt: string;
+  lastReadMessageId: string | null;
+  isSender: boolean;
+  user: PublicUser;
+}
+
 const DELETED_TEXT = 'This message was deleted';
 const MAX_MEDIA_BYTES = 50 * 1024 * 1024; // 50 MB
 
@@ -487,28 +496,7 @@ export class ChatService {
     userId: string,
     messageId: string,
   ): Promise<void> {
-    await this.assertMember(conversationId, userId);
-    const msg = await this.msgRepo.findOne({ where: { id: messageId, conversationId } });
-    if (!msg) throw new NotFoundException('Message not found');
-
-    await this.readRepo
-      .createQueryBuilder()
-      .insert()
-      .into(ConversationRead)
-      .values({
-        userId,
-        conversationId,
-        lastReadMessageId: messageId,
-        lastReadAt: new Date(),
-      })
-      .orUpdate(['last_read_message_id', 'last_read_at'], ['user_id', 'conversation_id'])
-      .execute();
-
-    this.gateway.emitToConversation(conversationId, 'read:update', {
-      userId,
-      conversationId,
-      lastReadMessageId: messageId,
-    });
+    await this.upsertReadRecord(userId, conversationId, messageId);
   }
 
   async listMessages(
@@ -538,6 +526,12 @@ export class ChatService {
     const rows = await qb.getMany();
     const hasMore = rows.length > safeLimit;
     const messages = rows.slice(0, safeLimit);
+
+    const member = await this.memRepo.findOne({ where: { conversationId, userId: user.id } });
+    const latestReadable = messages.find((m) => m.senderId !== user.id) ?? messages[0];
+    if (member && latestReadable) {
+      await this.upsertReadRecord(user.id, conversationId, latestReadable.id);
+    }
 
     const senderIds = [...new Set(messages.map((m) => m.senderId))];
     const replyIds = messages.filter((m) => m.replyToId).map((m) => m.replyToId!);
@@ -761,6 +755,10 @@ export class ChatService {
   }
 
   async upsertReadRecord(userId: string, conversationId: string, messageId: string): Promise<void> {
+    await this.assertMember(conversationId, userId);
+    const msg = await this.msgRepo.findOne({ where: { id: messageId, conversationId } });
+    if (!msg) throw new NotFoundException('Message not found');
+
     await this.readRepo
       .createQueryBuilder()
       .insert()
@@ -773,6 +771,12 @@ export class ChatService {
       })
       .orUpdate(['last_read_message_id', 'last_read_at'], ['user_id', 'conversation_id'])
       .execute();
+
+    this.gateway.emitToConversation(conversationId, 'read:update', {
+      userId,
+      conversationId,
+      lastReadMessageId: messageId,
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -818,14 +822,43 @@ export class ChatService {
     return msgs.map((m) => this.buildEnrichedMessage(m, userMap, null));
   }
 
-  async getReadReceipts(messageId: string, user: User) {
+  async getReadReceipts(messageId: string, user: User): Promise<MessageReadReceipt[]> {
     const msg = await this.msgRepo.findOne({ where: { id: messageId } });
     if (!msg) return [];
     await this.assertReadAccess(msg.conversationId, user);
+
     const members = await this.memRepo.find({ where: { conversationId: msg.conversationId } });
-    return members
-      .filter((m) => m.userId === msg.senderId)
-      .map((m) => ({ messageId: msg.id, userId: m.userId, readAt: msg.createdAt }));
+    const reads = await this.readRepo.find({ where: { conversationId: msg.conversationId } });
+    const readMap = new Map(reads.map((r) => [r.userId, r]));
+    const userMap = await this.buildUserMap(members.map((m) => m.userId));
+
+    return members.flatMap((m): MessageReadReceipt[] => {
+      const memberUser = userMap.get(m.userId);
+      if (!memberUser) return [];
+
+      if (m.userId === msg.senderId) {
+        return [{
+          messageId: msg.id,
+          userId: m.userId,
+          readAt: msg.createdAt.toISOString(),
+          lastReadMessageId: msg.id,
+          isSender: true,
+          user: this.toPublicUser(memberUser),
+        }];
+      }
+
+      const read = readMap.get(m.userId);
+      if (!read || read.lastReadAt < msg.createdAt) return [];
+
+      return [{
+        messageId: msg.id,
+        userId: m.userId,
+        readAt: read.lastReadAt.toISOString(),
+        lastReadMessageId: read.lastReadMessageId,
+        isSender: false,
+        user: this.toPublicUser(memberUser),
+      }];
+    });
   }
 
   async searchUsers(user: User, searchTerm: string) {

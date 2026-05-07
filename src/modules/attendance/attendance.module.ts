@@ -11,6 +11,7 @@ import { Section } from '../school-structure/entities/section.entity';
 import { User } from '../users/entities/user.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { GamificationModule } from '../gamification/gamification.module';
+import { AuditModule } from '../audit/audit.module';
 import { AttendanceService } from './attendance.service';
 import { AttendanceController } from './attendance.controller';
 
@@ -29,6 +30,7 @@ import { AttendanceController } from './attendance.controller';
     ]),
     NotificationsModule,
     GamificationModule,
+    AuditModule,
   ],
   controllers: [AttendanceController],
   providers: [AttendanceService],
