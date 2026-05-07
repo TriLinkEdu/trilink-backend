@@ -219,7 +219,8 @@ export class ChatGateway
 
     try {
       await this.chatService.upsertReadRecord(userId, data.conversationId, data.messageId);
-      this.server.to(`conversation:${data.conversationId}`).emit('read:update', {
+      // Broadcast to room EXCLUDING sender so sender can update "seen" status
+      client.to(`conversation:${data.conversationId}`).emit('read:update', {
         userId,
         conversationId: data.conversationId,
         lastReadMessageId: data.messageId,

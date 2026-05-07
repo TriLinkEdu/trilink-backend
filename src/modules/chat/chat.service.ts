@@ -404,8 +404,11 @@ export class ChatService {
 
     const enrichedSend = this.buildEnrichedMessage(msg, userMap, replyMsg);
 
-    // Fan out via Socket.IO
-    this.gateway.emitToConversation(conversationId, 'message:new', enrichedSend);
+    // Fan out via Socket.IO — wrap in { conversationId, message } as the frontend expects
+    this.gateway.emitToConversation(conversationId, 'message:new', {
+      conversationId,
+      message: enrichedSend,
+    });
 
     // Also emit conversation:update so list panels refresh (per-user payloads)
     await this.emitConversationUpdate(conversationId);
@@ -524,7 +527,6 @@ export class ChatService {
       .where('m.conversation_id = :cid', { cid: conversationId })
       .orderBy('m.created_at', 'DESC')
       .take(safeLimit + 1);
-
     if (before) {
       const cursor = await this.msgRepo.findOne({ where: { id: before } });
       if (!cursor) throw new BadRequestException('Invalid before cursor');
@@ -558,17 +560,16 @@ export class ChatService {
     const replyUserMap = await this.buildUserMap(replySenderIds);
     replyUserMap.forEach((v, k) => userMap.set(k, v));
 
+    // DB query returns newest-first; reverse to oldest-first for the frontend
+    const enrichedMessages = messages
+      .map((m) => this.buildEnrichedMessage(m, userMap, m.replyToId ? replyMap.get(m.replyToId) ?? null : null))
+      .reverse();
+
     return {
-      messages: messages.map((m) =>
-        this.buildEnrichedMessage(m, userMap, m.replyToId ? replyMap.get(m.replyToId) ?? null : null),
-      ),
+      messages: enrichedMessages,
       hasMore,
     };
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // CONVERSATION OPERATIONS
-  // ─────────────────────────────────────────────────────────────────────────
 
   async createConversation(
     body: Pick<Conversation, 'type' | 'title' | 'classOfferingId' | 'parentVisible' | 'createdById'> & { description?: string },
@@ -778,11 +779,17 @@ export class ChatService {
       .orUpdate(['last_read_message_id', 'last_read_at'], ['user_id', 'conversation_id'])
       .execute();
 
-    this.gateway.emitToConversation(conversationId, 'read:update', {
-      userId,
-      conversationId,
-      lastReadMessageId: messageId,
-    });
+    // Emit to all OTHER members so they can show "seen" ticks
+    // (the reader themselves doesn't need to receive their own read receipt)
+    const members = await this.memRepo.find({ where: { conversationId } });
+    for (const member of members) {
+      if (member.userId === userId) continue;
+      this.gateway.emitToUser(member.userId, 'read:update', {
+        userId,
+        conversationId,
+        lastReadMessageId: messageId,
+      });
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
