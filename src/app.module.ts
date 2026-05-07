@@ -36,6 +36,8 @@ import { HealthModule } from './modules/health/health.module';
 import { GradesModule } from './modules/grades/grades.module';
 import { AssignmentsModule } from './modules/assignments/assignments.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
+import { HomeroomModule } from './modules/homeroom/homeroom.module';
+import { ReportCardsModule } from './modules/report-cards/report-cards.module';
 // Modules added by other team members
 import { TextbooksModule } from './modules/textbooks/textbooks.module';
 import { LearningMaterialsModule } from './modules/learning-materials/learning-materials.module';
@@ -99,6 +101,8 @@ import { SearchModule } from './modules/search/search.module';
     ResourcesModule,
     CurriculumModule,
     SearchModule,
+    HomeroomModule,
+    ReportCardsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

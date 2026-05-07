@@ -49,6 +49,7 @@ class EditMarkDto {
 class CreateSessionDto {
   @ApiProperty({ description: 'Class offering UUID' }) @IsUUID() classOfferingId: string;
   @ApiProperty({ example: '2026-04-22', description: 'Session date (YYYY-MM-DD)' }) @IsString() date: string;
+  @ApiPropertyOptional({ description: 'Optional term UUID to tag this session' }) @IsOptional() @IsUUID() termId?: string;
 }
 
 @ApiTags('Attendance')
@@ -74,7 +75,7 @@ export class AttendanceController {
     @Body() body: CreateSessionDto,
     @CurrentUser() user: User,
   ) {
-    return this.svc.createSession({ ...body, takenById: user.id }, user);
+    return this.svc.createSession({ ...body, takenById: user.id, termId: body.termId ?? null }, user);
   }
 
   @Get('attendance-sessions')
@@ -323,5 +324,47 @@ export class AttendanceController {
   })
   repClass(@Param('classOfferingId', ParseUUIDPipe) classOfferingId: string) {
     return this.svc.reportClass(classOfferingId);
+  }
+
+  @Get('reports/attendance/student/:studentId/term/:termId')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({
+    summary: 'Attendance summary for a student in a specific term',
+    description:
+      'Returns attendance counts (present, absent, late, excused) and per-session details for a student in a term. ' +
+      'Matches sessions by termId or by date range if termId is not set on the session. ' +
+      'Students can only view their own. Parents can only view their linked child.',
+  })
+  @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  @ApiParam({ name: 'termId', description: 'Term UUID' })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      example: {
+        studentId: 'uuid',
+        firstName: 'Ali',
+        lastName: 'Hassan',
+        termId: 'uuid',
+        termName: 'Term 1',
+        present: 45,
+        absent: 2,
+        late: 1,
+        excused: 0,
+        total: 48,
+        attendancePercent: 95.8,
+        sessions: [
+          { sessionId: 'uuid', date: '2025-11-01', classOfferingId: 'uuid', status: 'present', note: null },
+        ],
+      },
+    },
+  })
+  @ApiResponse({ status: 403, description: 'Not allowed to view this student' })
+  @ApiResponse({ status: 404, description: 'Term not found' })
+  repStudentByTerm(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @Param('termId', ParseUUIDPipe) termId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.reportStudentByTerm(studentId, termId, user);
   }
 }

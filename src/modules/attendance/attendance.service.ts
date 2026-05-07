@@ -90,11 +90,11 @@ export class AttendanceService {
 
   // ─── Session management ───────────────────────────────────────────────────
 
-  async createSession(body: { classOfferingId: string; date: string; takenById: string }, viewer: User) {
+  async createSession(body: { classOfferingId: string; date: string; takenById: string; termId?: string | null }, viewer: User) {
     await this.assertTeacherOwnsClass(viewer, body.classOfferingId);
     const dup = await this.sessRepo.findOne({ where: { classOfferingId: body.classOfferingId, date: body.date } });
     if (dup) throw new ConflictException('Session already exists for this date');
-    return this.sessRepo.save(this.sessRepo.create(body));
+    return this.sessRepo.save(this.sessRepo.create({ ...body, termId: body.termId ?? null }));
   }
 
   async listSessions(classOfferingId: string) {
@@ -421,5 +421,120 @@ export class AttendanceService {
     );
 
     return { ...classDetail, sessions: out };
+  }
+
+  /**
+   * Attendance summary for a student in a specific term.
+   * Matches sessions by termId or by date range if termId is not set on the session.
+   */
+  async reportStudentByTerm(studentId: string, termId: string, viewer: User) {
+    await this.assertStudentViewer(viewer, studentId);
+
+    // Load term to get date range
+    const { Term } = await import('../academic-years/entities/term.entity');
+    // We need to query the terms table directly
+    const termResult = await this.sessRepo.manager.query(
+      `SELECT id, academic_year_id, name, start_date, end_date FROM terms WHERE id = $1`,
+      [termId],
+    );
+    if (!termResult || !termResult.length) {
+      throw new NotFoundException('Term not found');
+    }
+    const term = termResult[0] as { id: string; academic_year_id: string; name: string; start_date: string; end_date: string };
+
+    const studentInfo = await this.resolveStudent(studentId);
+
+    // Find all enrollments for this student in this academic year
+    const enrollments = await this.enrRepo.find({
+      where: { studentId, academicYearId: term.academic_year_id },
+    });
+    const classOfferingIds = enrollments.map((e) => e.classOfferingId);
+
+    if (!classOfferingIds.length) {
+      return {
+        ...studentInfo,
+        termId,
+        termName: term.name,
+        present: 0, absent: 0, late: 0, excused: 0, total: 0, attendancePercent: 0,
+        sessions: [],
+      };
+    }
+
+    // Sessions tagged with this termId
+    const sessionsByTermId = await this.sessRepo
+      .createQueryBuilder('s')
+      .where('s.class_offering_id IN (:...ids)', { ids: classOfferingIds })
+      .andWhere('s.term_id = :termId', { termId })
+      .getMany();
+
+    // Sessions without termId but within date range
+    const sessionsByDate = await this.sessRepo
+      .createQueryBuilder('s')
+      .where('s.class_offering_id IN (:...ids)', { ids: classOfferingIds })
+      .andWhere('s.term_id IS NULL')
+      .andWhere('s.date >= :start', { start: term.start_date })
+      .andWhere('s.date <= :end', { end: term.end_date })
+      .getMany();
+
+    // Merge and deduplicate
+    const allSessions = [...sessionsByTermId, ...sessionsByDate];
+    const seenIds = new Set<string>();
+    const sessions = allSessions.filter((s) => {
+      if (seenIds.has(s.id)) return false;
+      seenIds.add(s.id);
+      return true;
+    });
+
+    if (!sessions.length) {
+      return {
+        ...studentInfo,
+        termId,
+        termName: term.name,
+        present: 0, absent: 0, late: 0, excused: 0, total: 0, attendancePercent: 0,
+        sessions: [],
+      };
+    }
+
+    const sessionIds = sessions.map((s) => s.id);
+    const marks = await this.markRepo
+      .createQueryBuilder('m')
+      .where('m.session_id IN (:...ids)', { ids: sessionIds })
+      .andWhere('m.student_id = :studentId', { studentId })
+      .getMany();
+
+    const markMap = new Map(marks.map((m) => [m.sessionId, m]));
+
+    const present = marks.filter((m) => m.status === 'present').length;
+    const absent = marks.filter((m) => m.status === 'absent').length;
+    const late = marks.filter((m) => m.status === 'late').length;
+    const excused = marks.filter((m) => m.status === 'excused').length;
+    const total = marks.length;
+    const attendancePercent = total > 0 ? Math.round(((present + late) / total) * 1000) / 10 : 0;
+
+    const sessionDetails = sessions
+      .sort((a, b) => (a.date < b.date ? 1 : -1))
+      .map((s) => {
+        const mark = markMap.get(s.id);
+        return {
+          sessionId: s.id,
+          date: s.date,
+          classOfferingId: s.classOfferingId,
+          status: mark?.status ?? null,
+          note: mark?.note ?? null,
+        };
+      });
+
+    return {
+      ...studentInfo,
+      termId,
+      termName: term.name,
+      present,
+      absent,
+      late,
+      excused,
+      total,
+      attendancePercent,
+      sessions: sessionDetails,
+    };
   }
 }

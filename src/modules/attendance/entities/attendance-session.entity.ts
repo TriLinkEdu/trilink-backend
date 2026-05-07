@@ -21,6 +21,10 @@ export class AttendanceSession {
   @Column({ name: 'taken_by_id', type: 'uuid' })
   takenById: string;
 
+  /** Optional term this session belongs to */
+  @Column({ name: 'term_id', type: 'uuid', nullable: true })
+  termId: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }
