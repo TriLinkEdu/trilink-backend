@@ -11,10 +11,14 @@ import { getPostgresConnectionFromEnv } from './postgres-env';
     TypeOrmModule.forRootAsync({
       useFactory: (config: ConfigService) => {
         const dbType = config.get<string>('database.type') || 'postgres';
+        const loggingEnv = process.env.DB_LOGGING;
+        const logging = loggingEnv == null
+          ? process.env.NODE_ENV === 'development'
+          : ['true', '1', 'yes'].includes(loggingEnv.toLowerCase());
         const common = {
           entities: TYPEORM_ENTITIES,
           synchronize: process.env.NODE_ENV !== 'production',
-          logging: process.env.NODE_ENV === 'development',
+          logging,
         };
         if (dbType === 'sqlite') {
           const sqlitePath = config.get<string>('database.sqlitePath') || 'data/trilink.sqlite';

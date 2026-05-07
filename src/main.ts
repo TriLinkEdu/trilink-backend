@@ -1,11 +1,21 @@
 import { NestFactory } from '@nestjs/core';
-import { RequestMethod, ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe, LogLevel } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const logLevelEnv = (process.env.NEST_LOG_LEVEL || process.env.LOG_LEVEL || '').trim();
+  const logLevels = logLevelEnv
+    ? (logLevelEnv
+        .split(',')
+        .map((level) => level.trim())
+        .filter(Boolean) as LogLevel[])
+    : undefined;
+  const app = await NestFactory.create(
+    AppModule,
+    logLevels?.length ? { logger: logLevels } : undefined,
+  );
   const config = app.get(ConfigService);
   const port = config.get<number>('port') ?? 4000;
   const host = config.get<string>('host') || process.env.HOST || '0.0.0.0';
