@@ -304,6 +304,17 @@ export class ChatService {
     };
   }
 
+  private async emitConversationUpdate(conversationId: string): Promise<void> {
+    const conv = await this.convRepo.findOne({ where: { id: conversationId } });
+    if (!conv) return;
+
+    const members = await this.memRepo.find({ where: { conversationId } });
+    for (const member of members) {
+      const payload = await this.buildConversationPayload(conv, member.userId);
+      this.gateway.emitToUser(member.userId, 'conversation:update', payload);
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // MESSAGE OPERATIONS
   // ─────────────────────────────────────────────────────────────────────────
@@ -381,23 +392,23 @@ export class ChatService {
       lastMessageSenderId: senderId,
     });
 
-    const userMap = await this.buildUserMap([senderId, ...(dto.replyToId ? [msg.replyToId!] : [])]);
     let replyMsg: ChatMessage | null = null;
     if (dto.replyToId) {
       replyMsg = await this.msgRepo.findOne({ where: { id: dto.replyToId } }) ?? null;
     }
+
+    const userMap = await this.buildUserMap([
+      senderId,
+      ...(replyMsg?.senderId ? [replyMsg.senderId] : []),
+    ]);
 
     const enrichedSend = this.buildEnrichedMessage(msg, userMap, replyMsg);
 
     // Fan out via Socket.IO
     this.gateway.emitToConversation(conversationId, 'message:new', enrichedSend);
 
-    // Also emit conversation:update so list panels refresh
-    const updatedConv = await this.convRepo.findOne({ where: { id: conversationId } });
-    if (updatedConv) {
-      const convPayload = await this.buildConversationPayload(updatedConv, senderId);
-      this.gateway.emitToConversation(conversationId, 'conversation:update', convPayload);
-    }
+    // Also emit conversation:update so list panels refresh (per-user payloads)
+    await this.emitConversationUpdate(conversationId);
 
     return enrichedSend;
   }
@@ -427,7 +438,7 @@ export class ChatService {
       }
     }
     const enrichedEdit = this.buildEnrichedMessage(msg, userMap, replyMsg);
-    this.gateway.emitToConversation(msg.conversationId, 'message:new', enrichedEdit);
+    this.gateway.emitToConversation(msg.conversationId, 'message:update', enrichedEdit);
     return enrichedEdit;
   }
 
@@ -453,7 +464,7 @@ export class ChatService {
 
     const userMap = await this.buildUserMap([msg.senderId]);
     const enrichedDel = this.buildEnrichedMessage(msg, userMap, null);
-    this.gateway.emitToConversation(msg.conversationId, 'message:new', enrichedDel);
+    this.gateway.emitToConversation(msg.conversationId, 'message:update', enrichedDel);
     return enrichedDel;
   }
 
@@ -487,7 +498,7 @@ export class ChatService {
 
     const userMapReact = await this.buildUserMap([msg.senderId]);
     const enrichedReact = this.buildEnrichedMessage(msg, userMapReact, null);
-    this.gateway.emitToConversation(msg.conversationId, 'message:new', enrichedReact);
+    this.gateway.emitToConversation(msg.conversationId, 'message:update', enrichedReact);
     return enrichedReact;
   }
 
@@ -624,7 +635,7 @@ export class ChatService {
 
     await this.convRepo.save(conv);
     const updated = await this.buildConversationPayload(conv, userId);
-    this.gateway.emitToConversation(id, 'conversation:update', updated);
+    await this.emitConversationUpdate(id);
     return updated;
   }
 
@@ -689,12 +700,7 @@ export class ChatService {
 
     await this.memRepo.delete({ conversationId, userId: targetUserId });
 
-    // Notify room of member change
-    const conv = await this.convRepo.findOne({ where: { id: conversationId } });
-    if (conv) {
-      const payload = await this.buildConversationPayload(conv, requesterId);
-      this.gateway.emitToConversation(conversationId, 'conversation:update', payload);
-    }
+    await this.emitConversationUpdate(conversationId);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
