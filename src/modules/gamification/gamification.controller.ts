@@ -9,7 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiProperty, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -87,10 +87,55 @@ export class GamificationController {
     summary: 'Leaderboard by average released exam score',
     description: 'Per academic year; motivates performance (scope: “leaderboard”).',
   })
-  leaderboard(@Query('academicYearId') academicYearId: string, @Query('limit') limit?: string) {
+  @ApiQuery({ name: 'grade', required: false })
+  @ApiQuery({ name: 'section', required: false })
+  @ApiQuery({ name: 'subjectId', required: false })
+  leaderboard(
+    @CurrentUser() user: User,
+    @Query('academicYearId') academicYearId: string,
+    @Query('limit') limit?: string,
+    @Query('grade') grade?: string,
+    @Query('section') section?: string,
+    @Query('subjectId') subjectId?: string,
+  ) {
     if (!academicYearId) throw new BadRequestException('academicYearId query required');
     const n = parseInt(limit ?? '', 10);
-    return this.gam.leaderboardByExamAverage(academicYearId, Number.isFinite(n) ? n : 20);
+    const take = Number.isFinite(n) ? n : 20;
+    const effectiveGrade = user.role === UserRole.STUDENT ? user.grade : grade;
+    const effectiveSection = user.role === UserRole.STUDENT ? undefined : section;
+    return this.gam.leaderboardByExamAverage(
+      academicYearId,
+      take,
+      effectiveGrade ?? undefined,
+      effectiveSection,
+      subjectId,
+    );
+  }
+
+  @Get('leaderboard/xp')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({ summary: 'Leaderboard by XP (badge points)' })
+  @ApiQuery({ name: 'period', required: false, example: 'weekly | monthly | all' })
+  @ApiQuery({ name: 'grade', required: false })
+  @ApiQuery({ name: 'section', required: false })
+  leaderboardXp(
+    @CurrentUser() user: User,
+    @Query('period') period?: string,
+    @Query('limit') limit?: string,
+    @Query('grade') grade?: string,
+    @Query('section') section?: string,
+  ) {
+    const n = parseInt(limit ?? '', 10);
+    const take = Number.isFinite(n) ? n : 20;
+    const normalized = (period ?? 'weekly').toLowerCase();
+    const effectiveGrade = user.role === UserRole.STUDENT ? user.grade : grade;
+    const effectiveSection = user.role === UserRole.STUDENT ? undefined : section;
+    return this.gam.leaderboardByBadgePoints(
+      normalized as 'weekly' | 'monthly' | 'all',
+      take,
+      effectiveGrade ?? undefined,
+      effectiveSection,
+    );
   }
 
   @Get('students/:studentId/badges')
@@ -123,9 +168,19 @@ export class GamificationController {
   @Get('leaderboard/streaks')
   @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
   @ApiOperation({ summary: 'Leaderboard by current login streak' })
-  streakLeaderboard(@Query('limit') limit?: string) {
+  @ApiQuery({ name: 'grade', required: false })
+  @ApiQuery({ name: 'section', required: false })
+  streakLeaderboard(
+    @CurrentUser() user: User,
+    @Query('limit') limit?: string,
+    @Query('grade') grade?: string,
+    @Query('section') section?: string,
+  ) {
     const n = parseInt(limit ?? '', 10);
-    return this.gam.leaderboardStreaks(Number.isFinite(n) ? n : 20);
+    const take = Number.isFinite(n) ? n : 20;
+    const effectiveGrade = user.role === UserRole.STUDENT ? user.grade : grade;
+    const effectiveSection = user.role === UserRole.STUDENT ? undefined : section;
+    return this.gam.leaderboardStreaks(take, effectiveGrade ?? undefined, effectiveSection);
   }
 
   @Get('me/missions')
@@ -171,6 +226,13 @@ export class GamificationController {
   @ApiOperation({ summary: 'List current user achievements' })
   myAchievements(@CurrentUser() user: User) {
     return this.gam.listUserAchievements(user.id);
+  }
+
+  @Get('my-achievements/progress')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'List achievements with progress for current user' })
+  myAchievementsProgress(@CurrentUser() user: User) {
+    return this.gam.listAchievementsForUser(user.id);
   }
 
   @Post('check-achievements')

@@ -88,6 +88,12 @@ export class GamificationService implements OnModuleInit {
     },
   ];
 
+  private readIntEnv(key: string, fallback: number): number {
+    const raw = process.env[key];
+    const value = raw ? parseInt(raw, 10) : NaN;
+    return Number.isFinite(value) ? value : fallback;
+  }
+
   async assertStudentViewer(viewer: User, studentId: string) {
     if (viewer.role === UserRole.ADMIN || viewer.role === UserRole.TEACHER) return;
     if (viewer.role === UserRole.STUDENT && viewer.id === studentId) return;
@@ -301,6 +307,100 @@ export class GamificationService implements OnModuleInit {
     return result;
   }
 
+  async leaderboardByBadgePoints(
+    period: 'weekly' | 'monthly' | 'all',
+    limit = 20,
+    grade?: string,
+    section?: string,
+  ) {
+    const normalized = period === 'monthly' ? 'monthly' : period === 'all' ? 'all' : 'weekly';
+    const cacheKey = `leaderboard:xp:${normalized}:${grade || 'all'}:${section || 'all'}:${limit}`;
+    const cached = await this.cacheManager.get(cacheKey);
+    if (cached) return cached;
+
+    let fromDate: Date | undefined;
+    const now = new Date();
+    if (normalized === 'weekly') {
+      fromDate = new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate() - 6,
+        0,
+        0,
+        0,
+        0,
+      ));
+    } else if (normalized === 'monthly') {
+      fromDate = new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate() - 29,
+        0,
+        0,
+        0,
+        0,
+      ));
+    }
+
+    const qb = this.ubRepo
+      .createQueryBuilder('ub')
+      .innerJoin(User, 'u', 'u.id = ub.user_id')
+      .select('ub.user_id', 'userId')
+      .addSelect('SUM(ub.points_earned)', 'points')
+      .addSelect('u.first_name', 'firstName')
+      .addSelect('u.last_name', 'lastName')
+      .addSelect('u.email', 'email')
+      .addSelect('u.grade', 'grade')
+      .addSelect('u.section', 'section')
+      .where('u.role = :role', { role: UserRole.STUDENT });
+
+    if (fromDate) {
+      qb.andWhere('ub.awarded_at >= :fromDate', { fromDate });
+    }
+    if (grade) {
+      qb.andWhere('u.grade = :grade', { grade });
+    }
+    if (section) {
+      qb.andWhere('u.section = :section', { section });
+    }
+
+    const take = Math.min(Math.max(limit, 1), 100);
+    const rows = await qb
+      .groupBy('ub.user_id')
+      .addGroupBy('u.first_name')
+      .addGroupBy('u.last_name')
+      .addGroupBy('u.email')
+      .addGroupBy('u.grade')
+      .addGroupBy('u.section')
+      .orderBy('SUM(ub.points_earned)', 'DESC')
+      .addOrderBy('ub.user_id', 'ASC')
+      .take(take)
+      .getRawMany();
+
+    const entries = rows.map((row, index) => ({
+      rank: index + 1,
+      userId: row.userId,
+      points: Math.round(parseFloat(row.points) * 100) / 100,
+      student: {
+        firstName: row.firstName,
+        lastName: row.lastName,
+        email: row.email,
+        grade: row.grade,
+        section: row.section,
+      },
+    }));
+
+    const result = {
+      period: normalized,
+      metric: 'badgePoints',
+      filters: { grade, section },
+      entries,
+    };
+
+    await this.cacheManager.set(cacheKey, result, 300000); // 5 minutes
+    return result;
+  }
+
   async totalBadgePoints(userId: string) {
     const rows = await this.ubRepo.find({ where: { userId } });
     let total = 0;
@@ -332,7 +432,7 @@ export class GamificationService implements OnModuleInit {
     let row = await this.streakRepo.findOne({ where: { userId } });
     if (!row) {
       try {
-        return await this.streakRepo.save(
+        const created = await this.streakRepo.save(
           this.streakRepo.create({
             userId,
             currentStreak: 1,
@@ -340,6 +440,8 @@ export class GamificationService implements OnModuleInit {
             lastLoginDate: today,
           }),
         );
+        await this.checkAndUnlockAchievements(userId);
+        return created;
       } catch (e: any) {
         if (e?.code === '23505') {
           row = await this.streakRepo.findOne({ where: { userId } });
@@ -362,7 +464,9 @@ export class GamificationService implements OnModuleInit {
     }
     row.lastLoginDate = today;
     row.longestStreak = Math.max(row.longestStreak, row.currentStreak);
-    return this.streakRepo.save(row);
+    const saved = await this.streakRepo.save(row);
+    await this.checkAndUnlockAchievements(userId);
+    return saved;
   }
 
   async getLoginStreak(userId: string) {
@@ -383,6 +487,21 @@ export class GamificationService implements OnModuleInit {
 
     const totalXp = points.totalBadgePoints ?? 0;
     const level = Math.max(1, Math.floor(totalXp / 100));
+    const xpIntoCurrentLevel = totalXp % 100;
+    const xpNeededForNextLevel = 100;
+
+    const now = new Date();
+    const weekStart = new Date(Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() - 6,
+      0,
+      0,
+      0,
+      0,
+    ));
+    const weeklyXpEarned = await this.totalBadgePointsRaw(userId, weekStart);
+    const weeklyXpTarget = this.readIntEnv('GAMIFICATION_WEEKLY_XP_TARGET', 300);
 
     return {
       userId,
@@ -392,6 +511,10 @@ export class GamificationService implements OnModuleInit {
       level,
       levelTitle: this.levelTitle(level),
       lastLoginDate: streak.lastLoginDate ?? null,
+      xpIntoCurrentLevel,
+      xpNeededForNextLevel,
+      weeklyXpEarned,
+      weeklyXpTarget,
     };
   }
 
@@ -403,31 +526,55 @@ export class GamificationService implements OnModuleInit {
     return 'Starter';
   }
 
-  async leaderboardStreaks(limit = 20) {
-    const cacheKey = `leaderboard:streaks:${limit}`;
+  async leaderboardStreaks(limit = 20, grade?: string, section?: string) {
+    const cacheKey = `leaderboard:streaks:${limit}:${grade || 'all'}:${section || 'all'}`;
     const cached = await this.cacheManager.get(cacheKey);
     if (cached) return cached;
 
     const take = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 100) : 20;
-    const rows = await this.streakRepo.find({
-      order: { currentStreak: 'DESC', longestStreak: 'DESC' },
-      take,
-    });
-    const entries = [];
-    let rank = 1;
-    for (const r of rows) {
-      const u = await this.userRepo.findOne({ where: { id: r.userId } });
-      entries.push({
-        rank: rank++,
-        userId: r.userId,
-        currentStreak: r.currentStreak,
-        longestStreak: r.longestStreak,
-        user: u
-          ? { firstName: u.firstName, lastName: u.lastName, email: u.email, role: u.role }
-          : null,
-      });
+    const qb = this.streakRepo
+      .createQueryBuilder('s')
+      .innerJoin(User, 'u', 'u.id = s.user_id')
+      .select('s.user_id', 'userId')
+      .addSelect('s.current_streak', 'currentStreak')
+      .addSelect('s.longest_streak', 'longestStreak')
+      .addSelect('u.first_name', 'firstName')
+      .addSelect('u.last_name', 'lastName')
+      .addSelect('u.email', 'email')
+      .addSelect('u.role', 'role')
+      .addSelect('u.grade', 'grade')
+      .addSelect('u.section', 'section')
+      .where('u.role = :role', { role: UserRole.STUDENT });
+
+    if (grade) {
+      qb.andWhere('u.grade = :grade', { grade });
     }
-    const result = { metric: 'loginStreak', entries };
+    if (section) {
+      qb.andWhere('u.section = :section', { section });
+    }
+
+    const rows = await qb
+      .orderBy('s.current_streak', 'DESC')
+      .addOrderBy('s.longest_streak', 'DESC')
+      .addOrderBy('s.user_id', 'ASC')
+      .take(take)
+      .getRawMany();
+
+    const entries = rows.map((row, index) => ({
+      rank: index + 1,
+      userId: row.userId,
+      currentStreak: parseInt(row.currentStreak, 10),
+      longestStreak: parseInt(row.longestStreak, 10),
+      user: {
+        firstName: row.firstName,
+        lastName: row.lastName,
+        email: row.email,
+        role: row.role,
+        grade: row.grade,
+        section: row.section,
+      },
+    }));
+    const result = { metric: 'loginStreak', entries, filters: { grade, section } };
     await this.cacheManager.set(cacheKey, result, 300000); // 5 minutes
     return result;
   }
@@ -437,24 +584,27 @@ export class GamificationService implements OnModuleInit {
   }
 
   private missionTemplates() {
+    const checkinXp = this.readIntEnv('GAMIFICATION_MISSION_CHECKIN_XP', 20);
+    const quickQuizXp = this.readIntEnv('GAMIFICATION_MISSION_QUIZ_XP', 40);
+    const streakGuardXp = this.readIntEnv('GAMIFICATION_MISSION_STREAK_XP', 30);
     return [
       {
         key: 'checkin',
         title: 'Daily Check-in',
         description: 'Log in and keep your momentum today.',
-        xpReward: 20,
+        xpReward: checkinXp,
       },
       {
         key: 'quick_quiz',
         title: 'Complete 1 Quick Quiz',
         description: 'Finish one quick quiz in any subject.',
-        xpReward: 40,
+        xpReward: quickQuizXp,
       },
       {
         key: 'streak_guard',
         title: 'Protect Your Streak',
         description: 'Complete one mission to keep your learning streak strong.',
-        xpReward: 30,
+        xpReward: streakGuardXp,
       },
     ] as const;
   }
@@ -479,22 +629,34 @@ export class GamificationService implements OnModuleInit {
     return Math.max(1, Math.floor(totalXp / 100));
   }
 
-  private async totalBadgePointsRaw(userId: string): Promise<number> {
-    const result = await this.ubRepo
+  private async totalBadgePointsRaw(userId: string, fromDate?: Date): Promise<number> {
+    const qb = this.ubRepo
       .createQueryBuilder('ub')
       .select('COALESCE(SUM(ub.points_earned), 0)', 'total')
-      .where('ub.user_id = :userId', { userId })
-      .getRawOne();
+      .where('ub.user_id = :userId', { userId });
+    if (fromDate) {
+      qb.andWhere('ub.awarded_at >= :fromDate', { fromDate });
+    }
+    const result = await qb.getRawOne();
     return parseInt(result?.total || '0', 10);
   }
 
   private async badgeLeaderboardRank(userId: string): Promise<number | null> {
-    const rows = await this.ubRepo
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) return null;
+
+    const qb = this.ubRepo
       .createQueryBuilder('ub')
       .innerJoin(User, 'u', 'u.id = ub.user_id')
       .select('ub.user_id', 'userId')
       .addSelect('SUM(ub.points_earned)', 'points')
-      .where('u.role = :role', { role: UserRole.STUDENT })
+      .where('u.role = :role', { role: UserRole.STUDENT });
+
+    if (user.grade) {
+      qb.andWhere('u.grade = :grade', { grade: user.grade });
+    }
+
+    const rows = await qb
       .groupBy('ub.user_id')
       .orderBy('SUM(ub.points_earned)', 'DESC')
       .addOrderBy('ub.user_id', 'ASC')
@@ -579,12 +741,15 @@ export class GamificationService implements OnModuleInit {
     const afterLevel = this.levelFromXp(afterXp);
     const afterRank = await this.badgeLeaderboardRank(userId);
 
+    const newlyUnlocked = await this.checkAndUnlockAchievements(userId);
+    const newAchievementIds = newlyUnlocked.map((a) => a.id);
+
     return {
       xpDelta: template.xpReward,
       newTotalXp: afterXp,
       leveledUp: afterLevel > beforeLevel,
       newLevel: afterLevel,
-      newAchievementIds: [],
+      newAchievementIds,
       newBadgeIds: [badge.id],
       leaderboardBeforeRank: beforeRank,
       leaderboardAfterRank: afterRank,
@@ -602,8 +767,9 @@ export class GamificationService implements OnModuleInit {
       .select('COUNT(*)', 'count')
       .getRawOne<{ count: string }>();
     const completions = parseInt(rows?.count || '0', 10);
-    const progressCurrent = completions * 20;
-    const progressTarget = 1000;
+    const xpPerMission = this.readIntEnv('GAMIFICATION_TEAM_XP_PER_MISSION', 20);
+    const progressCurrent = completions * xpPerMission;
+    const progressTarget = this.readIntEnv('GAMIFICATION_TEAM_TARGET_XP', 1000);
     return {
       id: `team-week-${weekTag.replace('-', '')}`,
       title: 'Weekly Class Sprint',
@@ -625,32 +791,6 @@ export class GamificationService implements OnModuleInit {
     const subjectIds = [...new Set(classes.map((c) => c.subjectId).filter(Boolean))];
     if (!subjectIds.length) return [] as Subject[];
     return this.subjectRepo.find({ where: subjectIds.map((id) => ({ id })) });
-  }
-
-  private fallbackQuestions(subjectName: string) {
-    return [
-      {
-        id: `q-${subjectName.toLowerCase()}-1`,
-        text: `Quick check: ${subjectName} fundamentals question 1`,
-        options: ['Option A', 'Option B', 'Option C', 'Option D'],
-        correctIndex: 1,
-        type: 'multipleChoice',
-      },
-      {
-        id: `q-${subjectName.toLowerCase()}-2`,
-        text: `Quick check: ${subjectName} fundamentals question 2`,
-        options: ['Option A', 'Option B', 'Option C', 'Option D'],
-        correctIndex: 2,
-        type: 'multipleChoice',
-      },
-      {
-        id: `q-${subjectName.toLowerCase()}-3`,
-        text: `Quick check: ${subjectName} fundamentals question 3`,
-        options: ['Option A', 'Option B', 'Option C', 'Option D'],
-        correctIndex: 0,
-        type: 'multipleChoice',
-      },
-    ];
   }
 
   private async aiQuestionCandidatesForSubject(userId: string, subjectId: string) {
@@ -749,14 +889,16 @@ export class GamificationService implements OnModuleInit {
   async listQuizzesForStudent(user: User) {
     if (user.role !== UserRole.STUDENT) return [];
     const subjects = await this.enrolledSubjectsForStudent(user.id);
+    const questionCount = this.readIntEnv('GAMIFICATION_QUIZ_QUESTION_COUNT', 5);
+    const xpReward = this.readIntEnv('GAMIFICATION_QUIZ_REWARD', 50);
     return subjects.map((s) => ({
       id: `quiz-${s.id}`,
       title: `${s.name} Quick Quiz`,
       subjectId: s.id,
       subjectName: s.name,
       chapterId: null,
-      questionCount: 5,
-      xpReward: 50,
+      questionCount,
+      xpReward,
       difficulty: 'medium',
     }));
   }
@@ -768,7 +910,12 @@ export class GamificationService implements OnModuleInit {
     const subject = subjects.find((s) => s.id === subjectId);
     if (!subject) throw new NotFoundException('Quiz not found');
 
-    const rows = await this.questionRepo.find({ where: { subjectId }, take: 5, order: { createdAt: 'DESC' } });
+    const questionLimit = this.readIntEnv('GAMIFICATION_QUIZ_QUESTION_COUNT', 5);
+    const rows = await this.questionRepo.find({
+      where: { subjectId },
+      take: questionLimit,
+      order: { createdAt: 'DESC' },
+    });
     const questions = rows
       .map((q) => {
         try {
@@ -793,13 +940,17 @@ export class GamificationService implements OnModuleInit {
     const aiQuestions = aiCandidatesRaw
       .map((q, i) => this.normalizeAiQuestion(q, i))
       .filter((q): q is NonNullable<typeof q> => q !== null)
-      .slice(0, 5);
+      .slice(0, questionLimit);
 
     const finalQuestions = aiQuestions.length > 0
       ? aiQuestions
       : questions.length
       ? questions
-      : this.fallbackQuestions(subject.name);
+      : [];
+
+    if (finalQuestions.length === 0) {
+      throw new NotFoundException('No questions available for this subject yet');
+    }
 
     return {
       id: quizId,
@@ -826,7 +977,9 @@ export class GamificationService implements OnModuleInit {
     }
     const total = quiz.questions.length;
     const score = total > 0 ? (correct / total) * 100 : 0;
-    const xpEarned = Math.round(correct * 10 + (score >= 90 ? 20 : 0));
+    const perCorrect = this.readIntEnv('GAMIFICATION_QUIZ_POINTS_PER_CORRECT', 10);
+    const bonus = this.readIntEnv('GAMIFICATION_QUIZ_BONUS_90', 20);
+    const xpEarned = Math.round(correct * perCorrect + (score >= 90 ? bonus : 0));
 
     const beforeXp = await this.totalBadgePointsRaw(user.id);
     const beforeLevel = this.levelFromXp(beforeXp);
@@ -857,6 +1010,14 @@ export class GamificationService implements OnModuleInit {
     const missionMutation = await this.completeMission(user.id, this.missionId('quick_quiz', this.isoDate()));
     delta += missionMutation.xpDelta;
 
+    const newlyUnlocked = await this.checkAndUnlockAchievements(user.id);
+    const newAchievementIds = [
+      ...new Set([
+        ...missionMutation.newAchievementIds,
+        ...newlyUnlocked.map((a) => a.id),
+      ]),
+    ];
+
     const afterXp = beforeXp + delta;
     const afterLevel = this.levelFromXp(afterXp);
     const afterRank = await this.badgeLeaderboardRank(user.id);
@@ -876,7 +1037,7 @@ export class GamificationService implements OnModuleInit {
         newTotalXp: afterXp,
         leveledUp: afterLevel > beforeLevel,
         newLevel: afterLevel,
-        newAchievementIds: [],
+        newAchievementIds,
         newBadgeIds: [...awardedBadges, ...missionMutation.newBadgeIds],
         leaderboardBeforeRank: beforeRank,
         leaderboardAfterRank: afterRank,
@@ -952,6 +1113,66 @@ export class GamificationService implements OnModuleInit {
       where: { userId },
       relations: ['achievement'],
       order: { unlockedAt: 'DESC' },
+    });
+  }
+
+  async listAchievementsForUser(userId: string) {
+    const [achievements, unlocked, streakRow, badgeCount, totalPoints, examCount, perfectExam] =
+      await Promise.all([
+        this.achievementRepo.find({ order: { category: 'ASC', createdAt: 'ASC' } }),
+        this.userAchievementRepo.find({ where: { userId } }),
+        this.streakRepo.findOne({ where: { userId } }),
+        this.ubRepo.count({ where: { userId } }),
+        this.totalBadgePointsRaw(userId),
+        this.attRepo.count({ where: { studentId: userId, releasedAt: Not(IsNull()) } }),
+        this.attRepo.findOne({ where: { studentId: userId, score: 100, releasedAt: Not(IsNull()) } }),
+      ]);
+
+    const unlockedMap = new Map(unlocked.map((u) => [u.achievementId, u]));
+    const loginCount = streakRow ? 1 : 0;
+    const currentStreak = streakRow?.currentStreak ?? 0;
+
+    return achievements.map((achievement) => {
+      const condition = achievement.unlockCondition || {};
+      const target = typeof condition.value === 'number' ? condition.value : 1;
+      let current = 0;
+
+      switch (condition.type) {
+        case 'login_count':
+          current = loginCount;
+          break;
+        case 'streak':
+          current = currentStreak;
+          break;
+        case 'badge_count':
+          current = badgeCount;
+          break;
+        case 'points':
+          current = totalPoints;
+          break;
+        case 'exam_count':
+          current = examCount;
+          break;
+        case 'perfect_exam':
+          current = perfectExam ? 1 : 0;
+          break;
+        default:
+          current = 0;
+      }
+
+      const unlockedRow = unlockedMap.get(achievement.id);
+      return {
+        id: achievement.id,
+        title: achievement.title,
+        description: achievement.description ?? '',
+        iconUrl: achievement.iconUrl ?? '',
+        xpValue: 0,
+        isUnlocked: !!unlockedRow,
+        unlockedAt: unlockedRow?.unlockedAt ?? null,
+        category: achievement.category,
+        progressCurrent: current,
+        progressTarget: target,
+      };
     });
   }
 
