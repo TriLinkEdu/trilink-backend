@@ -243,6 +243,31 @@ export class ChatController {
   }
 
   // ── Block system ───────────────────────────────────────────────────────────
+  // NOTE: static routes (users/blocked, users/presence, users/search) MUST come
+  // before parameterized routes (users/:userId/...) to avoid NestJS matching
+  // "blocked"/"presence"/"search" as a :userId UUID and failing validation.
+
+  @Get('users/blocked')
+  @ApiOperation({ summary: 'List blocked users' })
+  listBlocked(@CurrentUser() user: User) {
+    return this.chat.listBlocked(user.id);
+  }
+
+  @Get('users/presence')
+  @ApiOperation({ summary: 'Get online presence for a list of users' })
+  @ApiQuery({ name: 'userIds', description: 'Comma-separated user UUIDs (max 100)' })
+  getPresence(@Query('userIds') userIds: string) {
+    if (!userIds) throw new BadRequestException('userIds query param required');
+    const ids = userIds.split(',').map((s) => s.trim()).filter(Boolean);
+    return this.chat.getPresence(ids);
+  }
+
+  @Get('users/search')
+  @ApiOperation({ summary: 'Search users to initiate a chat' })
+  @ApiQuery({ name: 'q', required: false })
+  searchUsers(@Query('q') query: string, @CurrentUser() user: User) {
+    return this.chat.searchUsers(user, query || '');
+  }
 
   @Post('users/:userId/block')
   @ApiOperation({ summary: 'Block a user' })
@@ -264,23 +289,6 @@ export class ChatController {
   ) {
     await this.chat.unblockUser(user.id, targetId);
     return { ok: true };
-  }
-
-  @Get('users/blocked')
-  @ApiOperation({ summary: 'List blocked users' })
-  listBlocked(@CurrentUser() user: User) {
-    return this.chat.listBlocked(user.id);
-  }
-
-  // ── Presence ───────────────────────────────────────────────────────────────
-
-  @Get('users/presence')
-  @ApiOperation({ summary: 'Get online presence for a list of users' })
-  @ApiQuery({ name: 'userIds', description: 'Comma-separated user UUIDs (max 100)' })
-  getPresence(@Query('userIds') userIds: string) {
-    if (!userIds) throw new BadRequestException('userIds query param required');
-    const ids = userIds.split(',').map((s) => s.trim()).filter(Boolean);
-    return this.chat.getPresence(ids);
   }
 
   // ── Media upload ───────────────────────────────────────────────────────────
@@ -331,12 +339,6 @@ export class ChatController {
     return this.chat.getReadReceipts(id, user);
   }
 
-  @Get('users/search')
-  @ApiOperation({ summary: 'Search users to initiate a chat' })
-  @ApiQuery({ name: 'q', required: false })
-  searchUsers(@Query('q') query: string, @CurrentUser() user: User) {
-    return this.chat.searchUsers(user, query || '');
-  }
   // ── Connection Management ──
   @Post('connections/request')
   @ApiOperation({ summary: 'Send connection request to another student' })
