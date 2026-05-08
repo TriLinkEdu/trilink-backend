@@ -1049,7 +1049,7 @@ export class ChatService {
 
   // ── Access Control ──
   async canUserMessageUser(fromUserId: string, toUserId: string): Promise<{ allowed: boolean; reason?: string }> {
-    // Check if blocked
+    // Block check — if either user has blocked the other, deny
     if (await this.isBlocked(fromUserId, toUserId)) {
       return { allowed: false, reason: 'User is blocked' };
     }
@@ -1062,47 +1062,32 @@ export class ChatService {
       return { allowed: false, reason: 'User not found' };
     }
 
-    // Students can message teachers in their classes
-    if (fromUser.role === UserRole.STUDENT && toUser.role === UserRole.TEACHER) {
-      const enrollmentRepo = this.convRepo.manager.getRepository('Enrollment');
-      const classOfferingRepo = this.convRepo.manager.getRepository('ClassOffering');
-      
-      // Get student's enrollments
-      const enrollments = await enrollmentRepo.find({ where: { studentId: fromUserId } });
-      const classIds = enrollments.map(e => e.classOfferingId);
-      
-      // Check if teacher teaches any of these classes
-      const classes = await classOfferingRepo.find({ where: { id: In(classIds), teacherId: toUserId } });
-      
-      if (classes.length > 0) {
-        return { allowed: true };
-      }
-      return { allowed: false, reason: 'Teacher does not teach your classes' };
-    }
-
-    // Students can message each other if connected
-    if (fromUser.role === UserRole.STUDENT && toUser.role === UserRole.STUDENT) {
-      if (await this.areConnected(fromUserId, toUserId)) {
-        return { allowed: true };
-      }
-      return { allowed: false, reason: 'Connection required to message other students' };
+    // Admin can message anyone
+    if (fromUser.role === UserRole.ADMIN || toUser.role === UserRole.ADMIN) {
+      return { allowed: true };
     }
 
     // Teachers can message anyone
-    if (fromUser.role === UserRole.TEACHER) {
+    if (fromUser.role === UserRole.TEACHER || toUser.role === UserRole.TEACHER) {
       return { allowed: true };
     }
 
-    // Parents can message teachers
-    if (fromUser.role === UserRole.PARENT && toUser.role === UserRole.TEACHER) {
+    // Students can message each other freely (same school)
+    if (fromUser.role === UserRole.STUDENT && toUser.role === UserRole.STUDENT) {
       return { allowed: true };
     }
 
-    // Admin can message anyone
-    if (fromUser.role === UserRole.ADMIN) {
+    // Parents can message anyone (teachers, admins, other parents)
+    if (fromUser.role === UserRole.PARENT) {
       return { allowed: true };
     }
 
-    return { allowed: false, reason: 'Not authorized to message this user' };
+    // Anyone can message a parent
+    if (toUser.role === UserRole.PARENT) {
+      return { allowed: true };
+    }
+
+    // Fallback — allow (school context: open communication)
+    return { allowed: true };
   }
 }
