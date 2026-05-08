@@ -793,98 +793,78 @@ export class GamificationService implements OnModuleInit {
     return this.subjectRepo.find({ where: subjectIds.map((id) => ({ id })) });
   }
 
-  private async aiQuestionCandidatesForSubject(userId: string, subjectId: string) {
-    const topicRows = await this.topicRepo.find({
-      where: { subjectId },
-      order: { orderIndex: 'ASC', createdAt: 'ASC' },
-      take: 6,
-    });
-    if (!topicRows.length) return [] as Array<Record<string, unknown>>;
+  // ── Grade helpers ──────────────────────────────────────────────────────────
 
+  /**
+   * Parse the numeric grade from user.grade strings like "Grade 9", "9", "Grade 10".
+   * Falls back to 9 if the value is missing or unparseable (matches AI engine default).
+   */
+  private parseGradeNumber(gradeStr: string | null | undefined): number {
+    if (!gradeStr) return 9;
+    const match = gradeStr.match(/(\d+)/);
+    return match ? parseInt(match[1], 10) : 9;
+  }
+
+  // ── AI quiz generation ─────────────────────────────────────────────────────
+
+  /**
+   * Calls the AI Engine's real-time quiz generation endpoint.
+   * Sends the student's subject name, grade level, and ordered curriculum
+   * topic names so the LLM generates fully grade-scoped, context-aware questions.
+   *
+   * Returns normalised question objects ready for the mobile client.
+   * Throws on failure so the caller can fall back to the local question bank.
+   */
+  private async generateAiQuiz(
+    subject: Subject,
+    gradeLevel: number,
+    count: number,
+  ): Promise<Array<Record<string, unknown>>> {
     const aiBase = (process.env.AI_SERVICE_URL || '').trim().replace(/\/$/, '');
-    if (!aiBase) return [] as Array<Record<string, unknown>>;
+    if (!aiBase) throw new Error('AI_SERVICE_URL not configured');
+
+    // Fetch ordered curriculum topics for this subject to give the LLM real context
+    const topicRows = await this.topicRepo.find({
+      where: { subjectId: subject.id },
+      order: { orderIndex: 'ASC', createdAt: 'ASC' },
+      take: 8,
+    });
+    const topicNames = topicRows.map((t) => t.name);
 
     const key = (process.env.INTERNAL_API_KEY || '').trim();
-    const out: Array<Record<string, unknown>> = [];
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
 
-    for (const topic of topicRows) {
-      try {
-        const params = new URLSearchParams({ limit: '5', difficulty: 'medium' });
-        const res = await fetch(`${aiBase}/api/ai/content/questions/${topic.id}?${params.toString()}`, {
-          method: 'GET',
-          headers: {
-            ...(key ? { 'X-API-Key': key } : {}),
-          },
-        });
-        if (!res.ok) continue;
-        const body = (await res.json()) as Record<string, unknown>;
-        const questions = (body['questions'] as Array<Record<string, unknown>> | undefined) || [];
-        for (const q of questions) {
-          out.push({ ...q, topicId: topic.id, topicName: topic.name });
-        }
-      } catch (_) {
-        // ignore AI failures; caller falls back to local bank.
-      }
+    try {
+      const res = await fetch(`${aiBase}/api/ai/content/generate-quiz`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(key ? { 'X-API-Key': key } : {}),
+        },
+        body: JSON.stringify({
+          subject: subject.name,
+          grade_level: gradeLevel,
+          topics: topicNames,
+          count,
+          difficulty: 'medium',
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) throw new Error(`AI Engine returned ${res.status}`);
+
+      const body = (await res.json()) as Record<string, unknown>;
+      const questions = (body['questions'] as Array<Record<string, unknown>> | undefined) || [];
+
+      if (!questions.length) throw new Error('AI Engine returned empty question list');
+
+      return questions;
+    } finally {
+      clearTimeout(timeout);
     }
-
-    return out;
   }
 
-  private normalizeAiQuestion(
-    raw: Record<string, unknown>,
-    index: number,
-  ): { id: string; text: string; options: string[]; correctIndex: number; type: string; pointValue: number } | null {
-    const id = String(raw['id'] ?? raw['question_id'] ?? `ai-q-${index + 1}`);
-    const text = String(raw['stem'] ?? raw['text'] ?? raw['question'] ?? '').trim();
-    if (!text) return null;
-
-    let options: string[] = [];
-    const optionsRaw = raw['options'];
-    if (Array.isArray(optionsRaw)) {
-      options = optionsRaw
-        .map((o) => {
-          if (typeof o === 'string') return o;
-          if (o && typeof o === 'object') {
-            const t = (o as Record<string, unknown>)['text'];
-            const l = (o as Record<string, unknown>)['label'];
-            return String(t ?? l ?? '').trim();
-          }
-          return String(o);
-        })
-        .filter((o) => o.length > 0);
-    }
-
-    if (options.length < 2) {
-      return null;
-    }
-
-    let correctIndex = 0;
-    const answerKey = raw['answer_key'] ?? raw['answerKey'] ?? raw['correctIndex'];
-    if (typeof answerKey === 'number') {
-      correctIndex = Math.trunc(answerKey);
-    } else if (typeof answerKey === 'string') {
-      const parsed = Number.parseInt(answerKey.trim(), 10);
-      if (Number.isFinite(parsed)) {
-        correctIndex = parsed;
-      } else {
-        const normalized = answerKey.trim().toLowerCase();
-        const match = options.findIndex((o) => o.trim().toLowerCase() === normalized);
-        if (match >= 0) correctIndex = match;
-      }
-    }
-    if (correctIndex < 0 || correctIndex >= options.length) {
-      correctIndex = 0;
-    }
-
-    return {
-      'id': id,
-      'text': text,
-      'options': options,
-      'correctIndex': correctIndex,
-      'type': 'multipleChoice',
-      'pointValue': 1,
-    };
-  }
 
   async listQuizzesForStudent(user: User) {
     if (user.role !== UserRole.STUDENT) return [];
@@ -911,57 +891,86 @@ export class GamificationService implements OnModuleInit {
     if (!subject) throw new NotFoundException('Quiz not found');
 
     const questionLimit = this.readIntEnv('GAMIFICATION_QUIZ_QUESTION_COUNT', 5);
-    const rows = await this.questionRepo.find({
-      where: { subjectId },
-      take: questionLimit,
-      order: { createdAt: 'DESC' },
-    });
-    const questions = rows
-      .map((q) => {
-        try {
-          const options = JSON.parse(q.optionsJson || '[]');
-          const answer = parseInt(q.answerKey || '', 10);
-          if (!Array.isArray(options) || options.length < 2 || !Number.isFinite(answer)) return null;
-          return {
-            id: q.id,
-            text: q.stem,
-            options: options.map((o: unknown) => String(o)),
-            correctIndex: answer,
-            type: 'multipleChoice',
-            pointValue: 1,
-          };
-        } catch (_) {
-          return null;
-        }
-      })
-      .filter((q): q is NonNullable<typeof q> => q !== null);
+    const gradeLevel   = this.parseGradeNumber(user.grade);
 
-    const aiCandidatesRaw = await this.aiQuestionCandidatesForSubject(user.id, subjectId);
-    const aiQuestions = aiCandidatesRaw
-      .map((q, i) => this.normalizeAiQuestion(q, i))
-      .filter((q): q is NonNullable<typeof q> => q !== null)
-      .slice(0, questionLimit);
+    // ── 1. Try AI generation (real-time, grade-scoped, curriculum-contextualised)
+    let finalQuestions: Array<Record<string, unknown>> = [];
+    let questionSource: 'ai' | 'local' = 'ai';
 
-    const finalQuestions = aiQuestions.length > 0
-      ? aiQuestions
-      : questions.length
-      ? questions
-      : [];
+    try {
+      const aiQuestions = await this.generateAiQuiz(subject, gradeLevel, questionLimit);
+      // AI engine already normalises to { id, text, options, correctIndex, ... }
+      // Validate each question has the required shape before accepting
+      finalQuestions = aiQuestions
+        .filter((q) => {
+          const text    = String(q['text'] ?? '').trim();
+          const options = Array.isArray(q['options']) ? q['options'] as string[] : [];
+          const ci      = typeof q['correctIndex'] === 'number' ? q['correctIndex'] : -1;
+          return text.length > 0 && options.length >= 2 && ci >= 0 && ci < options.length;
+        })
+        .slice(0, questionLimit)
+        .map((q) => ({
+          id           : String(q['id'] ?? `ai-${Math.random().toString(36).slice(2)}`) ,
+          text         : String(q['text']),
+          options      : (q['options'] as string[]).map(String),
+          correctIndex : q['correctIndex'] as number,
+          type         : 'multipleChoice',
+          pointValue   : 1,
+        }));
+    } catch (_aiErr) {
+      // AI unavailable or timed out — fall through to local bank
+      questionSource = 'local';
+    }
+
+    // ── 2. Local question bank fallback ────────────────────────────────────────
+    // Used when AI Engine is down. Filtered by subjectId; grade mixing is a known
+    // limitation of the current schema and is accepted as an emergency safety net.
+    if (finalQuestions.length === 0) {
+      questionSource = 'local';
+      const rows = await this.questionRepo.find({
+        where: { subjectId },
+        take: questionLimit,
+        order: { createdAt: 'DESC' },
+      });
+      finalQuestions = rows
+        .map((q) => {
+          try {
+            const options = JSON.parse(q.optionsJson || '[]');
+            const answer  = parseInt(q.answerKey || '', 10);
+            if (!Array.isArray(options) || options.length < 2 || !Number.isFinite(answer)) return null;
+            return {
+              id          : q.id,
+              text        : q.stem,
+              options     : options.map((o: unknown) => String(o)),
+              correctIndex: answer,
+              type        : 'multipleChoice',
+              pointValue  : 1,
+            };
+          } catch (_) {
+            return null;
+          }
+        })
+        .filter((q): q is NonNullable<typeof q> => q !== null);
+    }
 
     if (finalQuestions.length === 0) {
-      throw new NotFoundException('No questions available for this subject yet');
+      throw new NotFoundException(
+        'No questions available for this subject yet. The AI Engine may be starting up — please retry in a moment.',
+      );
     }
 
     return {
-      id: quizId,
-      title: `${subject.name} Quick Quiz`,
-      subjectId: subject.id,
-      subjectName: subject.name,
+      id            : quizId,
+      title         : `${subject.name} Quick Quiz`,
+      subjectId     : subject.id,
+      subjectName   : subject.name,
+      gradeLevel,
+      questionSource,
       durationMinutes: 10,
-      questions: finalQuestions,
-      isCompleted: false,
+      questions     : finalQuestions,
+      isCompleted   : false,
       lifecycleState: 'published',
-      isTimeLimited: true,
+      isTimeLimited : true,
     };
   }
 
@@ -971,8 +980,10 @@ export class GamificationService implements OnModuleInit {
     answers: Record<string, number>,
   ) {
     const quiz = await this.quizByIdForStudent(user, quizId);
+    type QuizQuestion = { id: string; correctIndex: number };
+    const typedQuestions = quiz.questions as QuizQuestion[];
     let correct = 0;
-    for (const q of quiz.questions) {
+    for (const q of typedQuestions) {
       if (answers[q.id] === q.correctIndex) correct += 1;
     }
     const total = quiz.questions.length;
@@ -1227,5 +1238,31 @@ export class GamificationService implements OnModuleInit {
     }
 
     return newlyUnlocked;
+  }
+  /** 
+   * Public wrapper used by GamificationHubService.
+   * Returns the next achievement the student can unlock, with progress details.
+   */
+  async nextBadgeProgressForUser(userId: string) {
+    const all = await this.listAchievementsForUser(userId);
+    // Find the first locked achievement with the most progress (% complete)
+    const locked = all
+      .filter((a) => !a.isUnlocked && a.progressTarget > 0)
+      .sort((a, b) => {
+        const pctA = a.progressCurrent / a.progressTarget;
+        const pctB = b.progressCurrent / b.progressTarget;
+        return pctB - pctA;
+      });
+
+    if (!locked.length) return null;
+
+    const next = locked[0];
+    return {
+      achievementId   : next.id,
+      title           : next.title,
+      progressCurrent : next.progressCurrent,
+      progressTarget  : next.progressTarget,
+      percentComplete : Math.round((next.progressCurrent / next.progressTarget) * 100),
+    };
   }
 }

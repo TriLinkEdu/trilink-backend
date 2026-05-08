@@ -18,6 +18,7 @@ import { UserRole } from '../users/entities/user.entity';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { GamificationService } from './gamification.service';
+import { GamificationHubService } from './services/gamification-hub.service';
 
 class CreateBadgeDto {
   @ApiProperty({ example: 'math_wizard' }) @IsString() @MinLength(2) key: string;
@@ -40,7 +41,24 @@ class SubmitGamificationQuizDto {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth('JWT')
 export class GamificationController {
-  constructor(private readonly gam: GamificationService) {}
+  constructor(
+    private readonly gam: GamificationService,
+    private readonly hubService: GamificationHubService,
+  ) {}
+
+  // ── BFF Hub (replaces 10 parallel mobile requests) ────────────────────────
+
+  @Get('hub')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({
+    summary: 'Gamification Hub — full state payload',
+    description:
+      'Returns streak, XP, achievements, leaderboard, quizzes, missions, team challenge, ' +
+      'and badges in a single round-trip. Use this instead of 10 individual endpoints.',
+  })
+  getHub(@CurrentUser() user: User) {
+    return this.hubService.getHub(user);
+  }
 
   @Get('badges')
   @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
