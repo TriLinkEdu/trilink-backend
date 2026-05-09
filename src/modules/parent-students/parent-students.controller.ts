@@ -7,7 +7,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ParentStudentsService } from './parent-students.service';
-import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 class LinkDto {
   @ApiProperty() @IsUUID() parentId: string;

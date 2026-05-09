@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { GamificationService } from '../gamification.service';
-import { XpService } from './xp.service';
 import { TeamChallengeService } from './team-challenge.service';
 import { User } from '../../users/entities/user.entity';
 
@@ -22,7 +21,6 @@ import { User } from '../../users/entities/user.entity';
 export class GamificationHubService {
   constructor(
     private readonly gam: GamificationService,
-    private readonly xp: XpService,
     private readonly teamChallenge: TeamChallengeService,
   ) {}
 
@@ -32,7 +30,7 @@ export class GamificationHubService {
     const [
       streak,
       achievements,
-      leaderboard,
+      leaderboardResult,
       availableQuizzes,
       dailyMissions,
       teamChallenge,
@@ -47,7 +45,7 @@ export class GamificationHubService {
       this.gam.listQuizzesForStudent(user),
       this.gam.listDailyMissions(userId),
       this.teamChallenge.getForStudent(userId),
-      this.xp.getProfile(userId),
+      this.gam.getMyProgress(userId),   // full progress including weeklyXp
       this.gam.nextBadgeProgressForUser(userId),
       this.gam.listBadges(),
       this.gam.listUserBadges(userId),
@@ -57,16 +55,22 @@ export class GamificationHubService {
       userId,
       streak,
       achievements,
-      leaderboard,
+      // Wrap in { entries: [...] } so the mobile repo reads lbRaw['entries'] correctly
+      leaderboard: {
+        period : 'weekly',
+        entries: (leaderboardResult as any)?.entries ?? [],
+      },
       availableQuizzes,
       dailyMissions,
       teamChallenge,
-      xpProgress   : {
-        totalXp               : xpProfile.totalXp,
-        level                 : xpProfile.level,
-        levelTitle            : this.levelTitle(xpProfile.level),
-        xpIntoCurrentLevel    : xpProfile.totalXp % 100,
-        xpNeededForNextLevel  : 100,
+      xpProgress: {
+        totalXp              : xpProfile.totalXp              ?? 0,
+        level                : xpProfile.level               ?? 1,
+        levelTitle           : this.levelTitle(xpProfile.level ?? 1),
+        xpIntoCurrentLevel   : xpProfile.xpIntoCurrentLevel  ?? 0,
+        xpNeededForNextLevel : xpProfile.xpNeededForNextLevel ?? 100,
+        weeklyXpEarned       : xpProfile.weeklyXpEarned       ?? 0,
+        weeklyXpTarget       : xpProfile.weeklyXpTarget       ?? 300,
       },
       nextBadgeProgress : nextBadge,
       badges,

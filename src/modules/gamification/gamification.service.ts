@@ -5,6 +5,7 @@ import {
   NotFoundException,
   OnModuleInit,
   Inject,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
@@ -318,69 +319,43 @@ export class GamificationService implements OnModuleInit {
     const cached = await this.cacheManager.get(cacheKey);
     if (cached) return cached;
 
-    let fromDate: Date | undefined;
-    const now = new Date();
-    if (normalized === 'weekly') {
-      fromDate = new Date(Date.UTC(
-        now.getUTCFullYear(),
-        now.getUTCMonth(),
-        now.getUTCDate() - 6,
-        0,
-        0,
-        0,
-        0,
-      ));
-    } else if (normalized === 'monthly') {
-      fromDate = new Date(Date.UTC(
-        now.getUTCFullYear(),
-        now.getUTCMonth(),
-        now.getUTCDate() - 29,
-        0,
-        0,
-        0,
-        0,
-      ));
-    }
-
-    const qb = this.ubRepo
-      .createQueryBuilder('ub')
-      .innerJoin(User, 'u', 'u.id = ub.user_id')
-      .select('ub.user_id', 'userId')
-      .addSelect('SUM(ub.points_earned)', 'points')
-      .addSelect('u.first_name', 'firstName')
-      .addSelect('u.last_name', 'lastName')
-      .addSelect('u.email', 'email')
-      .addSelect('u.grade', 'grade')
-      .addSelect('u.section', 'section')
-      .where('u.role = :role', { role: UserRole.STUDENT });
-
-    if (fromDate) {
-      qb.andWhere('ub.awarded_at >= :fromDate', { fromDate });
-    }
-    if (grade) {
-      qb.andWhere('u.grade = :grade', { grade });
-    }
-    if (section) {
-      qb.andWhere('u.section = :section', { section });
-    }
-
+    // ── Use GamificationProfile.totalXp as the single XP source of truth ──
+    // This keeps the leaderboard consistent with what the home dashboard and
+    // hub show (both derive XP from totalBadgePoints / GamificationProfile).
+    // The old approach (SUM user_badges with a date filter) caused "0 XP" on
+    // the leaderboard for students who earned all their XP before this week.
     const take = Math.min(Math.max(limit, 1), 100);
-    const rows = await qb
-      .groupBy('ub.user_id')
-      .addGroupBy('u.first_name')
-      .addGroupBy('u.last_name')
-      .addGroupBy('u.email')
-      .addGroupBy('u.grade')
-      .addGroupBy('u.section')
-      .orderBy('SUM(ub.points_earned)', 'DESC')
-      .addOrderBy('ub.user_id', 'ASC')
-      .take(take)
-      .getRawMany();
+
+    const rows: Array<{
+      userId: string;
+      totalXp: string;
+      firstName: string;
+      lastName: string;
+      email: string;
+      grade: string | null;
+      section: string | null;
+    }> = await this.ubRepo.manager.query(
+      `SELECT gp.user_id   AS "userId",
+              gp.total_xp  AS "totalXp",
+              u.first_name AS "firstName",
+              u.last_name  AS "lastName",
+              u.email      AS "email",
+              u.grade      AS "grade",
+              u.section    AS "section"
+         FROM gamification_profiles gp
+         JOIN users u ON u.id = gp.user_id
+        WHERE u.role = 'student'
+          ${grade ? `AND u.grade = '${grade.replace(/'/g, "''")}'` : ''}
+          ${section ? `AND u.section = '${section.replace(/'/g, "''")}'` : ''}
+        ORDER BY gp.total_xp DESC, gp.user_id ASC
+        LIMIT $1`,
+      [take],
+    );
 
     const entries = rows.map((row, index) => ({
       rank: index + 1,
       userId: row.userId,
-      points: Math.round(parseFloat(row.points) * 100) / 100,
+      points: parseInt(row.totalXp ?? '0', 10),
       student: {
         firstName: row.firstName,
         lastName: row.lastName,
@@ -392,12 +367,12 @@ export class GamificationService implements OnModuleInit {
 
     const result = {
       period: normalized,
-      metric: 'badgePoints',
+      metric: 'totalXp',
       filters: { grade, section },
       entries,
     };
 
-    await this.cacheManager.set(cacheKey, result, 300000); // 5 minutes
+    await this.cacheManager.set(cacheKey, result, 120_000); // 2 min TTL
     return result;
   }
 
@@ -868,7 +843,32 @@ export class GamificationService implements OnModuleInit {
 
   async listQuizzesForStudent(user: User) {
     if (user.role !== UserRole.STUDENT) return [];
-    const subjects = await this.enrolledSubjectsForStudent(user.id);
+
+    // Primary: subjects via active enrollments
+    let subjects = await this.enrolledSubjectsForStudent(user.id);
+
+    // Fallback: if no active enrollments, derive subjects from the grade→subject
+    // curriculum assignments. Chain: user.grade string → grades.name → grade_subjects.
+    if (subjects.length === 0 && user.grade) {
+      const rows: Array<{ id: string }> = await this.subjectRepo.manager.query(
+        `SELECT s.id
+           FROM subjects s
+           JOIN grade_subjects gs ON gs.subject_id = s.id
+           JOIN grades g ON g.id = gs.grade_id
+          WHERE g.name = $1
+          ORDER BY s.name ASC
+          LIMIT 6`,
+        [user.grade],
+      );
+      if (rows.length > 0) {
+        const ids = rows.map((r) => r.id);
+        subjects = await this.subjectRepo.find({
+          where: ids.map((id) => ({ id })),
+          order: { name: 'ASC' },
+        });
+      }
+    }
+
     const questionCount = this.readIntEnv('GAMIFICATION_QUIZ_QUESTION_COUNT', 5);
     const xpReward = this.readIntEnv('GAMIFICATION_QUIZ_REWARD', 50);
     return subjects.map((s) => ({
@@ -954,7 +954,7 @@ export class GamificationService implements OnModuleInit {
     }
 
     if (finalQuestions.length === 0) {
-      throw new NotFoundException(
+      throw new ServiceUnavailableException(
         'No questions available for this subject yet. The AI Engine may be starting up — please retry in a moment.',
       );
     }
