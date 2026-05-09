@@ -22,6 +22,9 @@ import { Grade } from '../school-structure/entities/grade.entity';
 import { Section } from '../school-structure/entities/section.entity';
 import { Subject } from '../school-structure/entities/subject.entity';
 import { GradesService } from '../grades/grades.service';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 
 export type ExamCreateInput = {
   title: string;
@@ -37,6 +40,8 @@ export type ExamCreateInput = {
 
 @Injectable()
 export class ExamsService {
+  private readonly logger = new Logger(ExamsService.name);
+
   constructor(
     @InjectRepository(Question) private readonly qRepo: Repository<Question>,
     @InjectRepository(Exam) private readonly examRepo: Repository<Exam>,
@@ -53,6 +58,8 @@ export class ExamsService {
     private readonly gamification: GamificationService,
     private readonly events: EventsGateway,
     private readonly gradesService: GradesService,
+    private readonly http: HttpService,
+    private readonly config: ConfigService,
   ) {}
 
   private assertExamEditor(exam: Exam, viewer: User) {
@@ -419,15 +426,38 @@ export class ExamsService {
 
       let earned = 0;
       let autoGraded = false;
+      let isCorrectForBKT = false;
+      
       if (this.autoGradableType(q.type) && q.answerKey != null && q.answerKey !== '') {
         autoGraded = true;
         if (hasAnswer && this.norm(raw) === this.norm(q.answerKey)) {
           earned = row.points;
+          isCorrectForBKT = true;
+        } else if (hasAnswer) {
+          isCorrectForBKT = false;
         }
       } else {
         needsManual = true;
         earned = 0;
       }
+      
+      // Fire BKT update hook for auto-graded questions that were actually answered
+      if (autoGraded && hasAnswer) {
+        const aiBase = this.config.get<string>('aiEngineUrl') || 'http://localhost:4001';
+        const aiKey = this.config.get<string>('aiEngineApiKey') || '';
+        this.http.post(
+          `${aiBase}/api/ai/mastery/update`,
+          {
+            student_id: a.studentId,
+            topic_id: q.subjectId, // Using subjectId as topic scope
+            is_correct: isCorrectForBKT,
+          },
+          { headers: { 'x-api-key': aiKey } }
+        ).subscribe({
+          error: (err: Error) => this.logger.debug(`Failed to update BKT mastery for ${a.studentId}`, err.message),
+        });
+      }
+
       earnedWeight += earned;
       perQuestion.push({
         questionId: q.id,

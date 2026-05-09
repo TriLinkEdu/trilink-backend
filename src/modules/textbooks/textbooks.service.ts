@@ -5,6 +5,9 @@ import { Textbook } from './entities/textbook.entity';
 import { FilesService } from '../files/files.service';
 import { CreateTextbookDto } from './dto/create-textbook.dto';
 import { TextbookResponseDto } from './dto/textbook-response.dto';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 import {
   Inject,
 } from '@nestjs/common';
@@ -15,11 +18,15 @@ import {
 
 @Injectable()
 export class TextbooksService {
+  private readonly logger = new Logger(TextbooksService.name);
+
   constructor(
     @InjectRepository(Textbook) private readonly repo: Repository<Textbook>,
     private readonly filesService: FilesService,
     @Inject(RESOURCE_STORAGE_PROVIDER)
     private readonly storage: ResourceStorageProvider,
+    private readonly http: HttpService,
+    private readonly config: ConfigService,
   ) {}
 
   /* ── Upload ─────────────────────────────────────────────── */
@@ -81,6 +88,24 @@ export class TextbooksService {
     });
 
     const saved = await this.repo.save(textbook);
+    
+    // Trigger asynchronous textbook ingestion on the AI Engine
+    const aiBase = this.config.get<string>('aiEngineUrl') || 'http://localhost:4001';
+    const aiKey = this.config.get<string>('aiEngineApiKey') || '';
+    
+    this.http.post(
+      `${aiBase}/api/ai/ingestion/trigger`,
+      {
+        pdf_url: pdfStored.accessUrl,
+        subject: dto.subject,
+        grade: dto.grade,
+      },
+      { headers: { 'x-api-key': aiKey } }
+    ).subscribe({
+      next: () => this.logger.log(`Triggered AI ingestion for ${dto.subject} Grade ${dto.grade}`),
+      error: (err: Error) => this.logger.error(`Failed to trigger AI ingestion for ${dto.subject} Grade ${dto.grade}`, err.message),
+    });
+
     return this.toDto(saved);
   }
 

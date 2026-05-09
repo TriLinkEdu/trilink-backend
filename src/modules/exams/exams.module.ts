@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { HttpModule } from '@nestjs/axios';
 import { Question } from './entities/question.entity';
 import { Exam } from './entities/exam.entity';
 import { ExamQuestion } from './entities/exam-question.entity';
@@ -28,6 +29,7 @@ import { ExamAttemptsController } from './exam-attempts.controller';
     NotificationsModule,
     GamificationModule,
     GradesModule,
+    HttpModule,
   ],
   controllers: [QuestionsController, ExamsController, ExamAttemptsController],
   providers: [ExamsService],

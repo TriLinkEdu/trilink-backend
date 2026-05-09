@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { HttpModule } from '@nestjs/axios';
 
 // Entities
 import { Badge } from './entities/badge.entity';
@@ -67,6 +68,7 @@ import { RedisClientProvider } from './providers/redis-client.provider';
     ]),
 
     NotificationsModule,
+    HttpModule,
   ],
   controllers: [GamificationController],
   providers: [
