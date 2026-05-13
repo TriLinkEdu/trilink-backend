@@ -35,6 +35,7 @@ import { UserBadge } from '../modules/gamification/entities/user-badge.entity';
 import { LoginStreak } from '../modules/gamification/entities/login-streak.entity';
 import { Achievement } from '../modules/gamification/entities/achievement.entity';
 import { UserAchievement } from '../modules/gamification/entities/user-achievement.entity';
+import { GamificationProfile } from '../modules/gamification/entities/gamification-profile.entity';
 import { StudentGoal } from '../modules/goals/entities/student-goal.entity';
 import { StudentProfile } from '../modules/student-profiles/entities/student-profile.entity';
 import { GradeEntry } from '../modules/grades/entities/grade-entry.entity';
@@ -83,6 +84,7 @@ export const TYPEORM_ENTITIES = [
   LoginStreak,
   Achievement,
   UserAchievement,
+  GamificationProfile,
   StudentGoal,
   StudentProfile,
   GradeEntry,

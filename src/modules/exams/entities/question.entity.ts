@@ -25,6 +25,15 @@ export class Question {
   @Column({ name: 'subject_id', type: 'uuid' })
   subjectId: string;
 
+  /**
+   * Optional AI-engine curriculum topic ID (a loosely-coupled reference to the
+   * `topics` table in the Python AI engine's database).  When set, BKT mastery
+   * updates will target this specific topic instead of falling back to the broad
+   * subjectId, giving the Learning Path and Recommendation services accurate data.
+   */
+  @Column({ name: 'topic_id', type: 'varchar', nullable: true, default: null })
+  topicId: string | null;
+
   @ManyToOne(() => Subject)
   @JoinColumn({ name: 'subject_id' })
   subject?: Subject;

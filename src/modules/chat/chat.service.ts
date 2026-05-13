@@ -8,7 +8,7 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, LessThan, Repository } from 'typeorm';
+import { Brackets, In, IsNull, LessThan, Repository } from 'typeorm';
 import { Conversation } from './entities/conversation.entity';
 import { ConversationMember } from './entities/conversation-member.entity';
 import { ChatMessage } from './entities/chat-message.entity';
@@ -18,6 +18,7 @@ import { ParentStudent } from '../parent-students/entities/parent-student.entity
 import { User, UserRole } from '../users/entities/user.entity';
 import { FileRecord } from '../files/entities/file-record.entity';
 import { FilesService } from '../files/files.service';
+import { UserBadge } from '../gamification/entities/user-badge.entity';
 import { ChatGateway } from './chat.gateway';
 import { SendMessageDto } from './dto/send-message.dto';
 import { UpdateConversationDto } from './dto/update-conversation.dto';
@@ -43,6 +44,9 @@ export interface EnrichedMessage {
   senderId: string;
   senderName: string;
   senderAvatarFileId: string | null;
+  senderRole: string | null;
+  senderGrade: string | null;
+  senderProfileImage: string | null;
   text: string | null;
   replyToId: string | null;
   replyTo: ReplyPreview | null;
@@ -140,6 +144,11 @@ export class ChatService {
     const sender = userMap.get(msg.senderId);
     const senderName = sender ? `${sender.firstName} ${sender.lastName}` : 'Unknown';
     const senderAvatarFileId = sender?.profileImageFileId ?? null;
+    const senderRole = sender?.role ?? null;
+    const senderGrade = sender?.grade ?? null;
+    const senderProfileImage = sender?.profileImageFileId 
+      ? `/files/${sender.profileImageFileId}/download` 
+      : null;
 
     const isDeleted = !!msg.deletedAt;
 
@@ -160,6 +169,9 @@ export class ChatService {
       senderId: msg.senderId,
       senderName,
       senderAvatarFileId,
+      senderRole,
+      senderGrade,
+      senderProfileImage,
       text: isDeleted ? null : msg.text,
       replyToId: msg.replyToId ?? null,
       replyTo,
@@ -840,13 +852,41 @@ export class ChatService {
     }
 
     if (user.role === UserRole.STUDENT) {
+      const enrollmentRepo = this.convRepo.manager.getRepository('Enrollment');
+      const classOfferingRepo = this.convRepo.manager.getRepository('ClassOffering');
+      const enrollments = await enrollmentRepo.find({ where: { studentId: user.id } });
+      const classIds = enrollments.map((e) => e.classOfferingId);
+      let teacherIds: string[] = [];
+      if (classIds.length > 0) {
+        const classes = await classOfferingRepo.find({ where: { id: In(classIds) } });
+        teacherIds = [...new Set(classes.map((c) => c.teacherId))].filter(Boolean);
+      }
+
       qb.andWhere(
-        '(u.role = :teacherRole OR (u.role = :studentRole AND u.grade = :userGrade))',
-        {
-          teacherRole: UserRole.TEACHER,
-          studentRole: UserRole.STUDENT,
-          userGrade: user.grade,
-        },
+        new Brackets((sub) => {
+          if (teacherIds.length > 0) {
+            sub.where('u.role = :teacherRole AND u.id IN (:...teacherIds)', {
+              teacherRole: UserRole.TEACHER,
+              teacherIds,
+            });
+          }
+          if (user.grade) {
+            const params: Record<string, unknown> = {
+              studentRole: UserRole.STUDENT,
+              userGrade: user.grade,
+            };
+            let clause = 'u.role = :studentRole AND u.grade = :userGrade';
+            if (user.section) {
+              clause += ' AND u.section = :userSection';
+              params['userSection'] = user.section;
+            }
+            if (teacherIds.length > 0) {
+              sub.orWhere(clause, params);
+            } else {
+              sub.where(clause, params);
+            }
+          }
+        }),
       );
     }
 
@@ -939,6 +979,59 @@ export class ChatService {
 
   // ── Connection Management ──
   async requestConnection(requesterId: string, recipientId: string) {
+    if (requesterId === recipientId) throw new BadRequestException('Cannot connect with yourself');
+
+    const userRepo = this.convRepo.manager.getRepository(User);
+    const requester = await userRepo.findOne({ where: { id: requesterId } });
+    const recipient = await userRepo.findOne({ where: { id: recipientId } });
+
+    if (!requester || !recipient) throw new NotFoundException('User not found');
+
+    if (requester.role === UserRole.STUDENT && recipient.role === UserRole.STUDENT) {
+      if (!requester.grade || !recipient.grade || requester.grade !== recipient.grade) {
+        throw new ForbiddenException('You can only connect with students in your grade');
+      }
+      if ((requester.section ?? '') !== (recipient.section ?? '')) {
+        throw new ForbiddenException('You can only connect with students in your section');
+      }
+    }
+
+    if (requester.role === UserRole.STUDENT && recipient.role === UserRole.TEACHER) {
+      const enrollmentRepo = this.convRepo.manager.getRepository('Enrollment');
+      const classOfferingRepo = this.convRepo.manager.getRepository('ClassOffering');
+      const enrollments = await enrollmentRepo.find({ where: { studentId: requesterId } });
+      if (enrollments.length > 0) {
+        const classes = await classOfferingRepo.find({ 
+          where: { id: In(enrollments.map(e => e.classOfferingId)), teacherId: recipientId } 
+        });
+        if (classes.length === 0) {
+          throw new ForbiddenException('Teacher does not teach your classes');
+        }
+      } else {
+        throw new ForbiddenException('You are not enrolled in any classes');
+      }
+    }
+
+    if (requester.role === UserRole.TEACHER && recipient.role === UserRole.STUDENT) {
+      const enrollmentRepo = this.convRepo.manager.getRepository('Enrollment');
+      const classOfferingRepo = this.convRepo.manager.getRepository('ClassOffering');
+      const enrollments = await enrollmentRepo.find({ where: { studentId: recipientId } });
+      if (enrollments.length > 0) {
+        const classes = await classOfferingRepo.find({
+          where: { id: In(enrollments.map((e) => e.classOfferingId)), teacherId: requesterId },
+        });
+        if (classes.length === 0) {
+          throw new ForbiddenException('You do not teach this student');
+        }
+      } else {
+        throw new ForbiddenException('Student is not enrolled in any classes');
+      }
+    }
+
+    if (requester.role === UserRole.TEACHER && recipient.role === UserRole.TEACHER) {
+      // Teachers can connect with teachers
+    }
+
     const connRepo = this.convRepo.manager.getRepository('ChatConnection');
     const existing = await connRepo.findOne({
       where: [
@@ -968,6 +1061,16 @@ export class ChatService {
     return connRepo.save(conn);
   }
 
+  async cancelConnection(connectionId: string, userId: string) {
+    const connRepo = this.convRepo.manager.getRepository('ChatConnection');
+    const conn = await connRepo.findOne({ where: { id: connectionId } });
+    if (!conn) throw new NotFoundException('Connection not found');
+    if (conn.requesterId !== userId) throw new ForbiddenException('Only the requester can cancel');
+    if (conn.status !== 'pending') throw new ForbiddenException('Only pending requests can be cancelled');
+    await connRepo.delete({ id: connectionId });
+    return { ok: true };
+  }
+
   async getConnections(userId: string) {
     const connRepo = this.convRepo.manager.getRepository('ChatConnection');
     const sent = await connRepo.find({ where: { requesterId: userId } });
@@ -984,6 +1087,60 @@ export class ChatService {
       ],
     });
     return !!conn;
+  }
+
+  // ── Interaction Profile ──
+  async getInteractionProfile(requesterId: string, targetId: string) {
+    const userRepo = this.convRepo.manager.getRepository(User);
+    const targetUser = await userRepo.findOne({ where: { id: targetId } });
+    if (!targetUser) throw new NotFoundException('User not found');
+
+    const isBlocked = await this.isBlocked(requesterId, targetId);
+    let connectionStatus = 'none';
+
+    const connRepo = this.convRepo.manager.getRepository('ChatConnection');
+    const conn = await connRepo.findOne({
+      where: [
+        { requesterId, recipientId: targetId },
+        { requesterId: targetId, recipientId: requesterId },
+      ],
+    });
+
+    if (conn) {
+      if (conn.status === 'accepted') connectionStatus = 'accepted';
+      else if (conn.status === 'pending') {
+        connectionStatus = conn.requesterId === requesterId ? 'pending_sent' : 'pending_received';
+      } else {
+        connectionStatus = conn.status;
+      }
+    }
+
+    let totalXp = 0;
+    if (targetUser.role === UserRole.STUDENT) {
+      const badgeRepo = this.convRepo.manager.getRepository(UserBadge);
+      const result = await badgeRepo
+        .createQueryBuilder('ub')
+        .select('COALESCE(SUM(ub.points_earned), 0)', 'total')
+        .where('ub.user_id = :userId', { userId: targetId })
+        .getRawOne();
+      totalXp = result?.total ? parseInt(result.total, 10) : 0;
+    }
+
+    return {
+      id: targetUser.id,
+      firstName: targetUser.firstName,
+      lastName: targetUser.lastName,
+      role: targetUser.role,
+      grade: targetUser.grade,
+      section: targetUser.section,
+      subject: targetUser.subject,
+      department: targetUser.department,
+      profileImageFileId: targetUser.profileImageFileId,
+      totalXp,
+      connectionStatus,
+      connectionId: conn?.id ?? null,
+      isBlocked,
+    };
   }
 
   // ── Blocking ──

@@ -159,6 +159,7 @@ export class ExamsService {
     answerKey?: string;
     attachmentsJson?: string;
     subjectId: string;
+    topicId?: string;
     createdById: string;
   }) {
     return this.qRepo.save(this.qRepo.create(body));
@@ -449,7 +450,7 @@ export class ExamsService {
           `${aiBase}/api/ai/mastery/update`,
           {
             student_id: a.studentId,
-            topic_id: q.subjectId, // Using subjectId as topic scope
+            topic_id: q.topicId ?? q.subjectId, // Use specific topicId if available, else fallback to subject scope
             is_correct: isCorrectForBKT,
           },
           { headers: { 'x-api-key': aiKey } }

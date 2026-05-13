@@ -5,6 +5,7 @@ import {
   NotFoundException,
   OnModuleInit,
   Inject,
+  forwardRef,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
@@ -12,6 +13,7 @@ import { Cache } from 'cache-manager';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, IsNull, Like, LessThan, Not, Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { XpService } from './services/xp.service';
 import { Badge } from './entities/badge.entity';
 import { UserBadge } from './entities/user-badge.entity';
 import { Achievement } from './entities/achievement.entity';
@@ -50,6 +52,7 @@ export class GamificationService implements OnModuleInit {
     @InjectRepository(Topic) private readonly topicRepo: Repository<Topic>,
     private readonly notifications: NotificationsService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    @Inject(forwardRef(() => XpService)) private readonly xpService: XpService,
   ) {}
 
   private readonly defaultBadges: Array<{
@@ -176,6 +179,11 @@ export class GamificationService implements OnModuleInit {
       awardedById,
       pointsEarned: badge.pointsValue 
     }));
+    // Award XP to the student's GamificationProfile so their level, progress
+    // bar, and Redis leaderboard rank all update atomically.
+    if (badge.pointsValue && badge.pointsValue > 0) {
+      await this.xpService.awardXp(userId, badge.pointsValue, 'badge_award', badge.id);
+    }
     await this.notifications.createForUser(userId, {
       type: 'badge',
       title: 'New badge',
@@ -886,7 +894,31 @@ export class GamificationService implements OnModuleInit {
   async quizByIdForStudent(user: User, quizId: string) {
     if (user.role !== UserRole.STUDENT) throw new ForbiddenException('Only students can access quizzes');
     const subjectId = quizId.replace(/^quiz-/, '');
-    const subjects = await this.enrolledSubjectsForStudent(user.id);
+
+    // Primary: subjects via active enrollments
+    let subjects = await this.enrolledSubjectsForStudent(user.id);
+
+    // Fallback: grade-based curriculum subjects (same logic as listQuizzesForStudent)
+    if (subjects.length === 0 && user.grade) {
+      const rows: Array<{ id: string }> = await this.subjectRepo.manager.query(
+        `SELECT s.id
+           FROM subjects s
+           JOIN grade_subjects gs ON gs.subject_id = s.id
+           JOIN grades g ON g.id = gs.grade_id
+          WHERE g.name = $1
+          ORDER BY s.name ASC
+          LIMIT 6`,
+        [user.grade],
+      );
+      if (rows.length > 0) {
+        const ids = rows.map((r) => r.id);
+        subjects = await this.subjectRepo.find({
+          where: ids.map((id) => ({ id })),
+          order: { name: 'ASC' },
+        });
+      }
+    }
+
     const subject = subjects.find((s) => s.id === subjectId);
     if (!subject) throw new NotFoundException('Quiz not found');
 
@@ -1013,13 +1045,25 @@ export class GamificationService implements OnModuleInit {
     const awardedBadges: string[] = [];
     let delta = 0;
     if (!existing) {
-      await this.ubRepo.save(this.ubRepo.create({ userId: user.id, badgeId: rewardBadge.id, awardedById: null }));
+      await this.ubRepo.save(
+        this.ubRepo.create({ 
+          userId: user.id, 
+          badgeId: rewardBadge.id, 
+          awardedById: null,
+          pointsEarned: xpEarned,
+        }),
+      );
       awardedBadges.push(rewardBadge.id);
       delta += xpEarned;
     }
 
     const missionMutation = await this.completeMission(user.id, this.missionId('quick_quiz', this.isoDate()));
     delta += missionMutation.xpDelta;
+
+    // Update gamification profile with total XP earned
+    if (delta > 0) {
+      await this.xpService.awardXp(user.id, delta, 'quiz', quizId);
+    }
 
     const newlyUnlocked = await this.checkAndUnlockAchievements(user.id);
     const newAchievementIds = [

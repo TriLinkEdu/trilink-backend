@@ -319,6 +319,15 @@ export class ChatController {
   searchUsers(@Query('q') query: string, @CurrentUser() user: User) {
     return this.chat.searchUsers(user, query || '');
   }
+
+  @Get('users/:userId/interaction-profile')
+  @ApiOperation({ summary: 'Get interaction profile for another user (connection state, block state, total XP)' })
+  getInteractionProfile(
+    @Param('userId', ParseUUIDPipe) targetId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.getInteractionProfile(user.id, targetId);
+  }
   // ── Connection Management ──
   @Post('connections/request')
   @ApiOperation({ summary: 'Send connection request to another student' })
@@ -345,6 +354,15 @@ export class ChatController {
     @CurrentUser() user: User,
   ) {
     return this.chat.rejectConnection(id, user.id);
+  }
+
+  @Delete('connections/:id')
+  @ApiOperation({ summary: 'Cancel connection request (requester only)' })
+  cancelConnection(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.cancelConnection(id, user.id);
   }
 
   @Get('connections')
