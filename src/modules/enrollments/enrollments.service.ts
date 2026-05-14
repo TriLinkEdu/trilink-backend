@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { Enrollment } from './entities/enrollment.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
@@ -14,6 +14,7 @@ import { Grade } from '../school-structure/entities/grade.entity';
 import { Section } from '../school-structure/entities/section.entity';
 import { Subject } from '../school-structure/entities/subject.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
+import { AcademicYear } from '../academic-years/entities/academic-year.entity';
 
 @Injectable()
 export class EnrollmentsService {
@@ -25,6 +26,8 @@ export class EnrollmentsService {
     @InjectRepository(Section) private readonly sectionRepo: Repository<Section>,
     @InjectRepository(Subject) private readonly subjectRepo: Repository<Subject>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
+    @InjectRepository(AcademicYear) private readonly yearRepo: Repository<AcademicYear>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async list(q: { studentId?: string; classOfferingId?: string; academicYearId?: string }) {
@@ -177,24 +180,175 @@ export class EnrollmentsService {
     const dup = await this.repo.findOne({ where: { studentId: body.studentId, classOfferingId: body.classOfferingId } });
     if (dup) throw new ConflictException('Already enrolled');
 
-    // A student can only have one active enrollment per academic year.
-    const activeInYear = await this.repo.findOne({
-      where: {
-        studentId: body.studentId,
-        academicYearId: body.academicYearId,
-        status: 'active',
-      },
-    });
-    if (activeInYear) {
-      throw new ConflictException('Student already has an active class enrollment for this academic year');
+    return this.repo.save(this.repo.create({ ...body, status: 'active' }));
+  }
+
+  async assignStudentsToSection(body: {
+    academicYearId?: string;
+    gradeId: string;
+    sectionId: string;
+    studentIds: string[];
+  }) {
+    if (!body.studentIds?.length) {
+      throw new BadRequestException('studentIds must contain at least one student');
     }
 
-    return this.repo.save(this.repo.create({ ...body, status: 'active' }));
+    const [grade, section] = await Promise.all([
+      this.gradeRepo.findOne({ where: { id: body.gradeId } }),
+      this.sectionRepo.findOne({ where: { id: body.sectionId } }),
+    ]);
+    if (!grade) throw new NotFoundException(`Grade with ID ${body.gradeId} not found`);
+    if (!section) throw new NotFoundException(`Section with ID ${body.sectionId} not found`);
+
+    const activeYear = body.academicYearId
+      ? await this.yearRepo.findOne({ where: { id: body.academicYearId } })
+      : await this.yearRepo.findOne({ where: { isActive: true, isArchived: false } });
+    if (!activeYear) {
+      throw new BadRequestException('No active academic year found. Provide academicYearId explicitly.');
+    }
+
+    const classOfferings = await this.classRepo.find({
+      where: {
+        academicYearId: activeYear.id,
+        gradeId: grade.id,
+        sectionId: section.id,
+      },
+      order: { createdAt: 'ASC' },
+    });
+    if (!classOfferings.length) {
+      throw new NotFoundException(
+        `No class offerings found for ${grade.name} ${section.name} in ${activeYear.label}`,
+      );
+    }
+
+    const studentRows = await this.userRepo.find({ where: { id: In(body.studentIds) } });
+    if (studentRows.length !== body.studentIds.length) {
+      const foundIds = new Set(studentRows.map((u) => u.id));
+      const missing = body.studentIds.filter((id) => !foundIds.has(id));
+      throw new BadRequestException(`One or more students were not found: ${missing.join(', ')}`);
+    }
+
+    const nonStudents = studentRows.filter((u) => u.role !== UserRole.STUDENT);
+    if (nonStudents.length) {
+      throw new BadRequestException(
+        `Only student users can be assigned to a section: ${nonStudents.map((u) => u.email).join(', ')}`,
+      );
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const userRepo = manager.getRepository(User);
+      const enrollmentRepo = manager.getRepository(Enrollment);
+
+      let enrollmentsCreated = 0;
+      let enrollmentsSkipped = 0;
+      const updatedStudents: Array<{ id: string; grade: string | null; section: string | null }> = [];
+
+      for (const student of studentRows) {
+        student.grade = grade.name;
+        student.section = section.name;
+        await userRepo.save(student);
+        updatedStudents.push({ id: student.id, grade: student.grade, section: student.section });
+
+        for (const offering of classOfferings) {
+          const existing = await enrollmentRepo.findOne({
+            where: { studentId: student.id, classOfferingId: offering.id },
+          });
+          if (existing) {
+            enrollmentsSkipped += 1;
+            continue;
+          }
+          await enrollmentRepo.save(
+            enrollmentRepo.create({
+              studentId: student.id,
+              classOfferingId: offering.id,
+              academicYearId: activeYear.id,
+              status: 'active',
+            }),
+          );
+          enrollmentsCreated += 1;
+        }
+      }
+
+      return {
+        academicYearId: activeYear.id,
+        academicYearLabel: activeYear.label,
+        gradeId: grade.id,
+        gradeName: grade.name,
+        sectionId: section.id,
+        sectionName: section.name,
+        studentCount: studentRows.length,
+        classOfferingCount: classOfferings.length,
+        enrollmentsCreated,
+        enrollmentsSkipped,
+        updatedStudents,
+        classOfferings: classOfferings.map((o) => ({
+          id: o.id,
+          subjectId: o.subjectId,
+          teacherId: o.teacherId,
+          name: o.name,
+        })),
+      };
+    });
   }
 
   async remove(id: string) {
     const e = await this.repo.findOne({ where: { id } });
     if (!e) throw new NotFoundException('Enrollment not found');
     await this.repo.remove(e);
+  }
+
+  async clearStudentsSection(body: { studentIds: string[] }) {
+    if (!body.studentIds?.length) throw new BadRequestException('studentIds must contain at least one student');
+
+    const activeYear = await this.yearRepo.findOne({ where: { isActive: true, isArchived: false } });
+    if (!activeYear) throw new BadRequestException('No active academic year found');
+
+    const studentRows = await this.userRepo.find({ where: { id: In(body.studentIds) } });
+    if (studentRows.length !== body.studentIds.length) {
+      const foundIds = new Set(studentRows.map((u) => u.id));
+      const missing = body.studentIds.filter((id) => !foundIds.has(id));
+      throw new BadRequestException(`One or more students were not found: ${missing.join(', ')}`);
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const userRepo = manager.getRepository(User);
+      const enrollmentRepo = manager.getRepository(Enrollment);
+
+      let studentsCleared = 0;
+      let enrollmentsRemoved = 0;
+
+      for (const student of studentRows) {
+        const gradeName = student.grade;
+        const sectionName = student.section;
+        if (!gradeName || !sectionName) continue;
+
+        const grade = await this.gradeRepo.findOne({ where: { name: gradeName } });
+        const section = await this.sectionRepo.findOne({ where: { name: sectionName } });
+        if (!grade || !section) {
+          // still clear the student's fields even if we can't find class offerings
+          student.grade = null;
+          student.section = null;
+          await userRepo.save(student);
+          studentsCleared += 1;
+          continue;
+        }
+
+        const classOfferings = await this.classRepo.find({ where: { academicYearId: activeYear.id, gradeId: grade.id, sectionId: section.id } });
+        const offeringIds = classOfferings.map((o) => o.id);
+
+        if (offeringIds.length) {
+          const del = await enrollmentRepo.createQueryBuilder().delete().where({ studentId: student.id }).andWhere('"classOfferingId" = ANY(:ids)', { ids: offeringIds }).execute();
+          // TypeORM delete result may not provide affected count in all drivers; approximate by length
+          enrollmentsRemoved += Array.isArray(del.raw) ? del.raw.length : 0;
+        }
+
+        student.grade = null;
+        student.section = null;
+        await userRepo.save(student);
+        studentsCleared += 1;
+      }
+
+      return { studentsCleared, enrollmentsRemoved };
+    });
   }
 }

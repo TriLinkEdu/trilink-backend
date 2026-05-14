@@ -1,905 +1,478 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  Inject,
-  forwardRef,
-  NotFoundException,
-  PayloadTooLargeException,
-} from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, LessThan, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Conversation } from './entities/conversation.entity';
 import { ConversationMember } from './entities/conversation-member.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { ConversationRead } from './entities/conversation-read.entity';
-import { UserBlock } from './entities/user-block.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
-import { User, UserRole } from '../users/entities/user.entity';
+import { UserBlock } from './entities/user-block.entity';
 import { FileRecord } from '../files/entities/file-record.entity';
-import { FilesService } from '../files/files.service';
-import { ChatGateway } from './chat.gateway';
-import { SendMessageDto } from './dto/send-message.dto';
-import { UpdateConversationDto } from './dto/update-conversation.dto';
-
-export interface PublicUser {
-  id: string;
-  firstName: string;
-  lastName: string;
-  role: string;
-  profileImageFileId: string | null;
-}
-
-export interface ReplyPreview {
-  id: string;
-  senderId: string;
-  senderName: string;
-  text: string | null;
-}
-
-export interface EnrichedMessage {
-  id: string;
-  conversationId: string;
-  senderId: string;
-  senderName: string;
-  senderAvatarFileId: string | null;
-  text: string | null;
-  replyToId: string | null;
-  replyTo: ReplyPreview | null;
-  mediaFileId: string | null;
-  mediaType: string | null;
-  mediaName: string | null;
-  mediaMimeType: string | null;
-  mediaSize: number | null;
-  reactions: Record<string, string[]>;
-  editedAt: string | null;
-  deletedAt: string | null;
-  createdAt: string;
-}
-
-export interface MemberWithUser {
-  userId: string;
-  role: string;
-  user: PublicUser;
-}
-
-export interface EnrichedConversation {
-  id: string;
-  type: string;
-  title: string;
-  description: string | null;
-  avatarFileId: string | null;
-  lastMessageText: string | null;
-  lastMessageAt: string | null;
-  lastMessageSenderId: string | null;
-  lastMessageSenderName: string | null;
-  unreadCount: number;
-  memberCount: number;
-  members: MemberWithUser[];
-  participants: PublicUser[];
-  createdById: string;
-  classOfferingId: string | null;
-  parentVisible: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface MediaGallery {
-  images: EnrichedMessage[];
-  videos: EnrichedMessage[];
-  audio: EnrichedMessage[];
-  files: EnrichedMessage[];
-}
-
-export interface MediaUploadResult {
-  fileId: string;
-  url: string;
-  mimeType: string;
-  size: number;
-  name: string;
-  mediaType: string;
-}
-
-const DELETED_TEXT = 'This message was deleted';
-const MAX_MEDIA_BYTES = 50 * 1024 * 1024; // 50 MB
-
+import { User, UserRole } from '../users/entities/user.entity';
+import { EventsGateway } from '../realtime/events.gateway';
 
 @Injectable()
 export class ChatService {
+  private readonly onlineUserIds = new Set<string>();
+
   constructor(
     @InjectRepository(Conversation) private readonly convRepo: Repository<Conversation>,
     @InjectRepository(ConversationMember) private readonly memRepo: Repository<ConversationMember>,
     @InjectRepository(ChatMessage) private readonly msgRepo: Repository<ChatMessage>,
     @InjectRepository(ConversationRead) private readonly readRepo: Repository<ConversationRead>,
-    @InjectRepository(UserBlock) private readonly blockRepo: Repository<UserBlock>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
+    @InjectRepository(UserBlock) private readonly blockRepo: Repository<UserBlock>,
     @InjectRepository(FileRecord) private readonly fileRepo: Repository<FileRecord>,
-    private readonly filesService: FilesService,
-    @Inject(forwardRef(() => ChatGateway)) private readonly gateway: ChatGateway,
+    private readonly events: EventsGateway,
   ) {}
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // HELPERS
-  // ─────────────────────────────────────────────────────────────────────────
-
-  private toPublicUser(u: User): PublicUser {
-    return {
-      id: u.id,
-      firstName: u.firstName,
-      lastName: u.lastName,
-      role: u.role,
-      profileImageFileId: u.profileImageFileId ?? null,
-    };
-  }
-
-  private buildEnrichedMessage(
-    msg: ChatMessage,
-    userMap: Map<string, User>,
-    replyMsg?: ChatMessage | null,
-  ): EnrichedMessage {
-    const sender = userMap.get(msg.senderId);
-    const senderName = sender ? `${sender.firstName} ${sender.lastName}` : 'Unknown';
-    const senderAvatarFileId = sender?.profileImageFileId ?? null;
-
-    const isDeleted = !!msg.deletedAt;
-
-    let replyTo: ReplyPreview | null = null;
-    if (replyMsg) {
-      const replySender = userMap.get(replyMsg.senderId);
-      replyTo = {
-        id: replyMsg.id,
-        senderId: replyMsg.senderId,
-        senderName: replySender ? `${replySender.firstName} ${replySender.lastName}` : 'Unknown',
-        text: replyMsg.deletedAt ? DELETED_TEXT : replyMsg.text,
-      };
-    }
-
-    return {
-      id: msg.id,
-      conversationId: msg.conversationId,
-      senderId: msg.senderId,
-      senderName,
-      senderAvatarFileId,
-      text: isDeleted ? null : msg.text,
-      replyToId: msg.replyToId ?? null,
-      replyTo,
-      mediaFileId: isDeleted ? null : (msg.mediaFileId ?? null),
-      mediaType: isDeleted ? null : (msg.mediaType ?? null),
-      mediaName: isDeleted ? null : (msg.mediaName ?? null),
-      mediaMimeType: isDeleted ? null : (msg.mediaMimeType ?? null),
-      mediaSize: isDeleted ? null : (msg.mediaSize ?? null),
-      reactions: msg.reactions ?? {},
-      editedAt: msg.editedAt ? msg.editedAt.toISOString() : null,
-      deletedAt: msg.deletedAt ? msg.deletedAt.toISOString() : null,
-      createdAt: msg.createdAt.toISOString(),
-    };
-  }
-
-  private async buildUserMap(userIds: string[]): Promise<Map<string, User>> {
-    if (!userIds.length) return new Map();
-    const uniq = [...new Set(userIds)];
-    const users = await this.convRepo.manager.getRepository(User).find({ where: { id: In(uniq) } });
-    return new Map(users.map((u) => [u.id, u]));
-  }
-
-  private deriveMediaType(mimeType: string): string {
-    if (mimeType.startsWith('image/')) return 'image';
-    if (mimeType.startsWith('video/')) return 'video';
-    if (mimeType.startsWith('audio/')) return 'audio';
-    return 'file';
-  }
-
-  async assertMember(conversationId: string, userId: string): Promise<ConversationMember> {
+  async assertMember(conversationId: string, userId: string) {
     const m = await this.memRepo.findOne({ where: { conversationId, userId } });
-    if (!m) throw new ForbiddenException('Not a member of this conversation');
-    return m;
+    if (!m) throw new ForbiddenException('Not a member');
   }
 
-  async assertAdminMember(conversationId: string, userId: string): Promise<ConversationMember> {
-    const m = await this.assertMember(conversationId, userId);
-    if (m.role !== 'admin') throw new ForbiddenException('Admin role required');
-    return m;
-  }
-
-  async assertReadAccess(conversationId: string, user: User): Promise<void> {
+  /** Read: member, or parent with parentVisible + linked child is a member, or admin. */
+  async assertReadAccess(conversationId: string, user: User) {
     if (user.role === UserRole.ADMIN) return;
     const m = await this.memRepo.findOne({ where: { conversationId, userId: user.id } });
     if (m) return;
     if (user.role !== UserRole.PARENT) throw new ForbiddenException('Not a member');
+    const conv = await this.convRepo.findOne({ where: { id: conversationId } });
+    if (!conv?.parentVisible) throw new ForbiddenException('Not a member');
     const members = await this.memRepo.find({ where: { conversationId } });
     const linkedChildIds = (await this.psRepo.find({ where: { parentId: user.id } })).map((l) => l.studentId);
-    if (!members.some((mem) => linkedChildIds.includes(mem.userId))) {
-      throw new ForbiddenException('Not a member');
-    }
+    const ok = members.some((mem) => linkedChildIds.includes(mem.userId));
+    if (!ok) throw new ForbiddenException('Not a member');
   }
 
-  private async buildConversationPayload(
-    conv: Conversation,
-    userId: string,
-  ): Promise<EnrichedConversation> {
-    const members = await this.memRepo.find({ where: { conversationId: conv.id } });
-    const memberCount = members.length;
-
-    const allUserIds = members.map((m) => m.userId);
-    const userMap = await this.buildUserMap(allUserIds);
-
-    // First 5 members with user info
-    const first5 = members.slice(0, 5).map((m) => ({
-      userId: m.userId,
-      role: m.role,
-      user: userMap.has(m.userId)
-        ? this.toPublicUser(userMap.get(m.userId)!)
-        : { id: m.userId, firstName: 'Unknown', lastName: '', role: 'member', profileImageFileId: null },
-    }));
-
-    // Participants for DM
-    const participants: PublicUser[] = conv.type === 'direct'
-      ? members.map((m) => userMap.has(m.userId)
-          ? this.toPublicUser(userMap.get(m.userId)!)
-          : { id: m.userId, firstName: 'Unknown', lastName: '', role: 'member', profileImageFileId: null })
-      : [];
-
-    // Unread count
-    const readRecord = await this.readRepo.findOne({ where: { userId, conversationId: conv.id } });
-    let unreadCount = 0;
-    if (readRecord?.lastReadAt) {
-      unreadCount = await this.msgRepo.count({
-        where: {
-          conversationId: conv.id,
-          createdAt: LessThan(new Date()) as any,
-          deletedAt: IsNull(),
-        },
-      });
-      // More precise: count messages after lastReadAt not sent by user
-      const qb = this.msgRepo.createQueryBuilder('m')
-        .where('m.conversation_id = :cid', { cid: conv.id })
-        .andWhere('m.created_at > :since', { since: readRecord.lastReadAt })
-        .andWhere('m.sender_id != :uid', { uid: userId })
-        .andWhere('m.deleted_at IS NULL');
-      unreadCount = await qb.getCount();
-    } else {
-      // No read record — count all messages not sent by user
-      const qb = this.msgRepo.createQueryBuilder('m')
-        .where('m.conversation_id = :cid', { cid: conv.id })
-        .andWhere('m.sender_id != :uid', { uid: userId })
-        .andWhere('m.deleted_at IS NULL');
-      unreadCount = await qb.getCount();
+  async createConversation(
+    body: Pick<Conversation, 'type' | 'title' | 'classOfferingId' | 'parentVisible' | 'createdById'>,
+    memberIds: string[],
+  ) {
+    const c = await this.convRepo.save(this.convRepo.create(body));
+    const uniq = [...new Set([body.createdById, ...memberIds])];
+    for (const uid of uniq) {
+      await this.memRepo.save(this.memRepo.create({ conversationId: c.id, userId: uid }));
     }
-
-    // Last message sender name
-    let lastMessageSenderName: string | null = null;
-    if (conv.lastMessageSenderId && userMap.has(conv.lastMessageSenderId)) {
-      const s = userMap.get(conv.lastMessageSenderId)!;
-      lastMessageSenderName = `${s.firstName} ${s.lastName}`;
-    }
-
-    return {
-      id: conv.id,
-      type: conv.type,
-      title: conv.title,
-      description: conv.description ?? null,
-      avatarFileId: conv.avatarFileId ?? null,
-      lastMessageText: conv.lastMessageText ?? null,
-      lastMessageAt: conv.lastMessageAt ? conv.lastMessageAt.toISOString() : null,
-      lastMessageSenderId: conv.lastMessageSenderId ?? null,
-      lastMessageSenderName,
-      unreadCount,
-      memberCount,
-      members: first5,
-      participants,
-      createdById: conv.createdById,
-      classOfferingId: conv.classOfferingId ?? null,
-      parentVisible: conv.parentVisible,
-      createdAt: conv.createdAt.toISOString(),
-      updatedAt: conv.updatedAt.toISOString(),
-    };
+    return this.convRepo.findOne({ where: { id: c.id } });
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // MESSAGE OPERATIONS
-  // ─────────────────────────────────────────────────────────────────────────
+  async getUserConversationIds(userId: string): Promise<string[]> {
+    const mems = await this.memRepo.find({ where: { userId } });
+    return [...new Set(mems.map((m) => m.conversationId))];
+  }
 
-  async sendMessage(
-    conversationId: string,
-    senderId: string,
-    dto: SendMessageDto,
-  ): Promise<EnrichedMessage> {
-    await this.assertMember(conversationId, senderId);
+  private async getDirectPeerUserId(conversationId: string, userId: string): Promise<string | null> {
+    const conversation = await this.convRepo.findOne({ where: { id: conversationId } });
+    if (!conversation || conversation.type !== 'direct') return null;
 
-    if (!dto.text && !dto.mediaFileId) {
-      throw new BadRequestException('Message must have text or media');
+    const members = await this.memRepo.find({ where: { conversationId } });
+    const peer = members.find((member) => member.userId !== userId);
+    return peer?.userId ?? null;
+  }
+
+  private async getBlockState(conversationId: string, userId: string) {
+    const peerUserId = await this.getDirectPeerUserId(conversationId, userId);
+    if (!peerUserId) {
+      return { blockedByMe: false, blockedMe: false, peerUserId: null };
     }
 
-    const conv = await this.convRepo.findOne({ where: { id: conversationId } });
-    if (!conv) throw new NotFoundException('Conversation not found');
+    const blockedByMe = await this.blockRepo.exist({ where: { blockerId: userId, blockedId: peerUserId } });
+    const blockedMe = await this.blockRepo.exist({ where: { blockerId: peerUserId, blockedId: userId } });
+    return { blockedByMe, blockedMe, peerUserId };
+  }
 
-    // Block check for DMs
-    if (conv.type === 'direct') {
-      const members = await this.memRepo.find({ where: { conversationId } });
-      const recipientId = members.find((m) => m.userId !== senderId)?.userId;
-      if (recipientId) {
-        const blocked = await this.blockRepo.findOne({
-          where: { blockerId: recipientId, blockedId: senderId },
-        });
-        if (blocked) throw new ForbiddenException('You have been blocked by this user');
-      }
-    }
+  async blockConversationPeer(conversationId: string, userId: string) {
+    const { peerUserId } = await this.getBlockState(conversationId, userId);
+    if (!peerUserId) throw new ForbiddenException('Only direct conversations can be blocked');
 
-    // Validate replyToId
-    if (dto.replyToId) {
-      const replyMsg = await this.msgRepo.findOne({ where: { id: dto.replyToId } });
-      if (!replyMsg || replyMsg.conversationId !== conversationId) {
-        throw new BadRequestException('Invalid replyToId: message not in this conversation');
-      }
-    }
-
-    // Validate mediaFileId
-    let mediaType: string | null = null;
-    let mediaName: string | null = null;
-    let mediaMimeType: string | null = null;
-    let mediaSize: number | null = null;
-
-    if (dto.mediaFileId) {
-      const fileRec = await this.fileRepo.findOne({ where: { id: dto.mediaFileId } });
-      if (!fileRec || fileRec.uploadedById !== senderId) {
-        throw new BadRequestException('Invalid mediaFileId');
-      }
-      mediaMimeType = fileRec.mime;
-      mediaType = this.deriveMediaType(fileRec.mime);
-      mediaName = fileRec.filename;
-      mediaSize = fileRec.sizeBytes ? Number(fileRec.sizeBytes) : null;
-    }
-
-    const msg = await this.msgRepo.save(
-      this.msgRepo.create({
-        conversationId,
-        senderId,
-        text: dto.text ?? null,
-        replyToId: dto.replyToId ?? null,
-        mediaFileId: dto.mediaFileId ?? null,
-        mediaType,
-        mediaName,
-        mediaMimeType,
-        mediaSize,
-        reactions: {},
-      }),
+    await this.blockRepo.upsert(
+      this.blockRepo.create({ blockerId: userId, blockedId: peerUserId }),
+      ['blockerId', 'blockedId'],
     );
-
-    // Update conversation last message
-    await this.convRepo.update(conversationId, {
-      lastMessageText: dto.text ? dto.text.substring(0, 500) : `[${mediaType ?? 'file'}]`,
-      lastMessageAt: msg.createdAt,
-      lastMessageSenderId: senderId,
-    });
-
-    const userMap = await this.buildUserMap([senderId, ...(dto.replyToId ? [msg.replyToId!] : [])]);
-    let replyMsg: ChatMessage | null = null;
-    if (dto.replyToId) {
-      replyMsg = await this.msgRepo.findOne({ where: { id: dto.replyToId } }) ?? null;
-    }
-
-    const enrichedSend = this.buildEnrichedMessage(msg, userMap, replyMsg);
-
-    // Fan out via Socket.IO
-    this.gateway.emitToConversation(conversationId, 'message:new', enrichedSend);
-
-    // Also emit conversation:update so list panels refresh
-    const updatedConv = await this.convRepo.findOne({ where: { id: conversationId } });
-    if (updatedConv) {
-      const convPayload = await this.buildConversationPayload(updatedConv, senderId);
-      this.gateway.emitToConversation(conversationId, 'conversation:update', convPayload);
-    }
-
-    return enrichedSend;
+    return { blockedByMe: true, blockedMe: false, peerUserId };
   }
 
-  async editMessage(
-    conversationId: string,
-    msgId: string,
-    userId: string,
-    text: string,
-  ): Promise<EnrichedMessage> {
-    const msg = await this.msgRepo.findOne({ where: { id: msgId, conversationId } });
-    if (!msg) throw new NotFoundException('Message not found');
-    if (msg.senderId !== userId) throw new ForbiddenException('Only the sender can edit this message');
-    if (msg.deletedAt) throw new BadRequestException('Cannot edit a deleted message');
+  async unblockConversationPeer(conversationId: string, userId: string) {
+    const { peerUserId } = await this.getBlockState(conversationId, userId);
+    if (!peerUserId) throw new ForbiddenException('Only direct conversations can be unblocked');
 
-    msg.text = text;
-    msg.editedAt = new Date();
-    await this.msgRepo.save(msg);
-
-    const userMap = await this.buildUserMap([msg.senderId]);
-    let replyMsg: ChatMessage | null = null;
-    if (msg.replyToId) {
-      replyMsg = await this.msgRepo.findOne({ where: { id: msg.replyToId } }) ?? null;
-      if (replyMsg) {
-        const replyUserMap = await this.buildUserMap([replyMsg.senderId]);
-        replyUserMap.forEach((v, k) => userMap.set(k, v));
-      }
-    }
-    const enrichedEdit = this.buildEnrichedMessage(msg, userMap, replyMsg);
-    this.gateway.emitToConversation(msg.conversationId, 'message:new', enrichedEdit);
-    return enrichedEdit;
+    await this.blockRepo.delete({ blockerId: userId, blockedId: peerUserId });
+    return { blockedByMe: false, blockedMe: false, peerUserId };
   }
 
-  async deleteMessage(
-    conversationId: string,
-    msgId: string,
-    userId: string,
-    userRole: UserRole,
-  ): Promise<EnrichedMessage> {
-    const msg = await this.msgRepo.findOne({ where: { id: msgId, conversationId } });
-    if (!msg) throw new NotFoundException('Message not found');
-
-    const isAdmin = userRole === UserRole.ADMIN;
-    const convMember = await this.memRepo.findOne({ where: { conversationId, userId } });
-    const isConvAdmin = convMember?.role === 'admin';
-
-    if (msg.senderId !== userId && !isAdmin && !isConvAdmin) {
-      throw new ForbiddenException('Not authorized to delete this message');
+  async setOnline(_userId: string, _isOnline: boolean): Promise<void> {
+    if (_isOnline) {
+      this.onlineUserIds.add(_userId);
+      return;
     }
-
-    msg.deletedAt = new Date();
-    await this.msgRepo.save(msg);
-
-    const userMap = await this.buildUserMap([msg.senderId]);
-    const enrichedDel = this.buildEnrichedMessage(msg, userMap, null);
-    this.gateway.emitToConversation(msg.conversationId, 'message:new', enrichedDel);
-    return enrichedDel;
+    this.onlineUserIds.delete(_userId);
   }
 
-  async toggleReaction(
-    conversationId: string,
-    msgId: string,
-    userId: string,
-    emoji: string,
-  ): Promise<EnrichedMessage> {
-    await this.assertMember(conversationId, userId);
-    const msg = await this.msgRepo.findOne({ where: { id: msgId, conversationId } });
-    if (!msg) throw new NotFoundException('Message not found');
-    if (msg.deletedAt) throw new BadRequestException('Cannot react to a deleted message');
-
-    const reactions: Record<string, string[]> = msg.reactions ?? {};
-    const users: string[] = reactions[emoji] ?? [];
-
-    if (users.includes(userId)) {
-      const updated = users.filter((id) => id !== userId);
-      if (updated.length === 0) {
-        delete reactions[emoji];
-      } else {
-        reactions[emoji] = updated;
-      }
-    } else {
-      reactions[emoji] = [...users, userId];
-    }
-
-    msg.reactions = reactions;
-    await this.msgRepo.save(msg);
-
-    const userMapReact = await this.buildUserMap([msg.senderId]);
-    const enrichedReact = this.buildEnrichedMessage(msg, userMapReact, null);
-    this.gateway.emitToConversation(msg.conversationId, 'message:new', enrichedReact);
-    return enrichedReact;
+  isUserOnline(userId: string): boolean {
+    return this.onlineUserIds.has(userId);
   }
 
-  async markRead(
-    conversationId: string,
-    userId: string,
-    messageId: string,
-  ): Promise<void> {
-    await this.assertMember(conversationId, userId);
-    const msg = await this.msgRepo.findOne({ where: { id: messageId, conversationId } });
-    if (!msg) throw new NotFoundException('Message not found');
-
-    await this.readRepo
-      .createQueryBuilder()
-      .insert()
-      .into(ConversationRead)
-      .values({
+  async upsertReadRecord(userId: string, conversationId: string, messageId: string): Promise<void> {
+    await this.readRepo.save(
+      this.readRepo.create({
         userId,
         conversationId,
         lastReadMessageId: messageId,
-        lastReadAt: new Date(),
-      })
-      .orUpdate(['last_read_message_id', 'last_read_at'], ['user_id', 'conversation_id'])
-      .execute();
-
-    this.gateway.emitToConversation(conversationId, 'read:update', {
-      userId,
-      conversationId,
-      lastReadMessageId: messageId,
-    });
-  }
-
-  async listMessages(
-    conversationId: string,
-    user: User,
-    limit = 50,
-    before?: string,
-  ): Promise<{ messages: EnrichedMessage[]; hasMore: boolean }> {
-    await this.assertReadAccess(conversationId, user);
-
-    const safeLimit = Math.min(Math.max(limit, 1), 100);
-    const qb = this.msgRepo
-      .createQueryBuilder('m')
-      .where('m.conversation_id = :cid', { cid: conversationId })
-      .orderBy('m.created_at', 'DESC')
-      .take(safeLimit + 1);
-
-    if (before) {
-      const cursor = await this.msgRepo.findOne({ where: { id: before } });
-      if (!cursor) throw new BadRequestException('Invalid before cursor');
-      if (cursor.conversationId !== conversationId) {
-        throw new BadRequestException('Cursor message does not belong to this conversation');
-      }
-      qb.andWhere('m.created_at < :cursorDate', { cursorDate: cursor.createdAt });
-    }
-
-    const rows = await qb.getMany();
-    const hasMore = rows.length > safeLimit;
-    const messages = rows.slice(0, safeLimit);
-
-    const senderIds = [...new Set(messages.map((m) => m.senderId))];
-    const replyIds = messages.filter((m) => m.replyToId).map((m) => m.replyToId!);
-    const allIds = [...new Set([...senderIds, ...replyIds])];
-    const userMap = await this.buildUserMap(allIds);
-
-    const replyMsgs = replyIds.length
-      ? await this.msgRepo.find({ where: { id: In(replyIds) } })
-      : [];
-    const replyMap = new Map(replyMsgs.map((r) => [r.id, r]));
-
-    const replySenderIds = replyMsgs.map((r) => r.senderId);
-    const replyUserMap = await this.buildUserMap(replySenderIds);
-    replyUserMap.forEach((v, k) => userMap.set(k, v));
-
-    return {
-      messages: messages.map((m) =>
-        this.buildEnrichedMessage(m, userMap, m.replyToId ? replyMap.get(m.replyToId) ?? null : null),
-      ),
-      hasMore,
-    };
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // CONVERSATION OPERATIONS
-  // ─────────────────────────────────────────────────────────────────────────
-
-  async createConversation(
-    body: Pick<Conversation, 'type' | 'title' | 'classOfferingId' | 'parentVisible' | 'createdById'> & { description?: string },
-    memberIds: string[],
-  ): Promise<EnrichedConversation> {
-    const conv = await this.convRepo.save(
-      this.convRepo.create({
-        ...body,
-        description: body.description ?? null,
       }),
     );
-    const uniq = [...new Set([body.createdById, ...memberIds])];
-    for (const uid of uniq) {
-      const role = uid === body.createdById ? 'admin' : 'member';
-      await this.memRepo.save(this.memRepo.create({ conversationId: conv.id, userId: uid, role }));
-    }
-    return this.buildConversationPayload(conv, body.createdById);
   }
 
-  async listConversations(userId: string, role: UserRole): Promise<EnrichedConversation[]> {
+  async listConversations(userId: string, role: UserRole) {
     const mems = await this.memRepo.find({ where: { userId } });
     const fromMember = mems.map((m) => m.conversationId);
     let extra: string[] = [];
-
     if (role === UserRole.PARENT) {
       const links = await this.psRepo.find({ where: { parentId: userId } });
       const childIds = links.map((l) => l.studentId);
       if (childIds.length) {
         const childMems = await this.memRepo.find({ where: { userId: In(childIds) } });
-        extra = [...new Set(childMems.map((m) => m.conversationId))];
+        const convIds = [...new Set(childMems.map((m) => m.conversationId))];
+        if (convIds.length) {
+          const convs = await this.convRepo.find({
+            where: { id: In(convIds), parentVisible: true },
+          });
+          extra = convs.map((c) => c.id);
+        }
       }
     }
-
     const all = [...new Set([...fromMember, ...extra])];
     if (!all.length) return [];
 
-    const convs = await this.convRepo.find({
-      where: { id: In(all) },
-      order: { lastMessageAt: 'DESC', updatedAt: 'DESC' },
-    });
+    const conversations = await this.convRepo.find({ where: { id: In(all) }, order: { updatedAt: 'DESC' } });
+    if (!conversations.length) return [];
 
-    return Promise.all(convs.map((c) => this.buildConversationPayload(c, userId)));
+    const conversationIds = conversations.map((c) => c.id);
+    const members = await this.memRepo.find({ where: { conversationId: In(conversationIds) } });
+    const uniqueUserIds = [...new Set(members.map((m) => m.userId))];
+    const users = uniqueUserIds.length
+      ? await this.convRepo.manager.getRepository(User).find({ where: { id: In(uniqueUserIds) } })
+      : [];
+    const directConversationIds = conversations.filter((conversation) => conversation.type === 'direct').map((conversation) => conversation.id);
+    const blockPairs = directConversationIds.length
+      ? await this.blockRepo
+          .createQueryBuilder('block')
+          .where('block.blockerId = :userId', { userId })
+          .andWhere(
+            `block.blockedId IN (
+              SELECT mem.user_id
+              FROM conversation_members mem
+              WHERE mem.conversation_id IN (:...conversationIds)
+                AND mem.user_id <> :userId
+            )`,
+            { conversationIds: directConversationIds },
+          )
+          .getMany()
+      : [];
+    const blockedPeerIds = new Set(blockPairs.map((block) => block.blockedId));
+    const blockedByMePairs = directConversationIds.length
+      ? await this.blockRepo
+          .createQueryBuilder('block')
+          .where('block.blockedId = :userId', { userId })
+          .andWhere(
+            `block.blockerId IN (
+              SELECT mem.user_id
+              FROM conversation_members mem
+              WHERE mem.conversation_id IN (:...conversationIds)
+                AND mem.user_id <> :userId
+            )`,
+            { conversationIds: directConversationIds },
+          )
+          .getMany()
+      : [];
+    const blockedMePeerIds = new Set(blockedByMePairs.map((block) => block.blockerId));
+
+    // Fetch the last message for each conversation
+    const lastMessages = await Promise.all(
+      conversationIds.map((convId) =>
+        this.msgRepo.findOne({
+          where: { conversationId: convId },
+          order: { createdAt: 'DESC' },
+        }),
+      ),
+    );
+
+    const messagesByConversationId = new Map<string, ChatMessage>();
+    for (const msg of lastMessages) {
+      if (msg) messagesByConversationId.set(msg.conversationId, msg);
+    }
+
+    const userById = new Map(users.map((u) => [u.id, u]));
+    const membersByConversationId = new Map<string, typeof members>();
+
+    for (const member of members) {
+      const list = membersByConversationId.get(member.conversationId) ?? [];
+      list.push(member);
+      membersByConversationId.set(member.conversationId, list);
+    }
+
+    return conversations.map((conversation) => {
+      const conversationMembers = membersByConversationId.get(conversation.id) ?? [];
+      const resolvedMembers = conversationMembers.map((member) => {
+        const resolvedUser = userById.get(member.userId);
+        const firstName = resolvedUser?.firstName?.trim() ?? '';
+        const lastName = resolvedUser?.lastName?.trim() ?? '';
+        const displayName = `${firstName} ${lastName}`.trim() || `User ${member.userId.slice(0, 6)}`;
+        return {
+          userId: member.userId,
+          role: resolvedUser?.role ?? null,
+          displayName,
+          isOnline: this.isUserOnline(member.userId),
+        };
+      });
+
+      const lastMessage = messagesByConversationId.get(conversation.id);
+      const peerUserId = conversation.type === 'direct'
+        ? conversationMembers.find((member) => member.userId !== userId)?.userId ?? null
+        : null;
+
+      return {
+        ...conversation,
+        memberIds: conversationMembers.map((m) => m.userId),
+        members: resolvedMembers,
+        lastMessageText: lastMessage?.text || lastMessage?.mediaName || null,
+        lastMessageAt: lastMessage?.createdAt || conversation.updatedAt,
+        lastMessageSenderId: lastMessage?.senderId || null,
+        blockedByMe: peerUserId ? blockedPeerIds.has(peerUserId) : false,
+        blockedMe: peerUserId ? blockedMePeerIds.has(peerUserId) : false,
+      };
+    });
   }
 
-  async getConversation(id: string, user: User): Promise<EnrichedConversation> {
+  async getConversation(id: string, user: User) {
     await this.assertReadAccess(id, user);
-    const conv = await this.convRepo.findOne({ where: { id } });
-    if (!conv) throw new NotFoundException('Conversation not found');
-    return this.buildConversationPayload(conv, user.id);
+    return this.convRepo.findOne({ where: { id } });
   }
 
-  async updateConversation(
-    id: string,
-    userId: string,
-    dto: UpdateConversationDto,
-  ): Promise<EnrichedConversation> {
-    await this.assertAdminMember(id, userId);
-    const conv = await this.convRepo.findOne({ where: { id } });
-    if (!conv) throw new NotFoundException('Conversation not found');
+  async postMessage(conversationId: string, senderId: string, text?: string | null, mediaFileId?: string | null, replyToId?: string | null) {
+    await this.assertMember(conversationId, senderId);
+    const blockState = await this.getBlockState(conversationId, senderId);
+    if (blockState.blockedByMe || blockState.blockedMe) {
+      throw new ForbiddenException('This conversation is blocked');
+    }
 
-    if (dto.title !== undefined) conv.title = dto.title;
-    if (dto.description !== undefined) conv.description = dto.description;
-    if (dto.avatarFileId !== undefined) conv.avatarFileId = dto.avatarFileId;
+    const mediaFile = mediaFileId ? await this.fileRepo.findOne({ where: { id: mediaFileId } }) : null;
+    if (!text?.trim() && !mediaFile) {
+      throw new ForbiddenException('Message text or media file is required');
+    }
 
-    await this.convRepo.save(conv);
-    const updated = await this.buildConversationPayload(conv, userId);
-    this.gateway.emitToConversation(id, 'conversation:update', updated);
-    return updated;
-  }
+    const mediaType = mediaFile
+      ? mediaFile.mime.startsWith('image/')
+        ? 'image'
+        : mediaFile.mime.startsWith('video/')
+          ? 'video'
+          : mediaFile.mime.startsWith('audio/')
+            ? 'audio'
+            : 'file'
+      : null;
 
-  async getMediaGallery(conversationId: string, userId: string): Promise<MediaGallery> {
-    await this.assertMember(conversationId, userId);
+    const msg = await this.msgRepo.save(
+      this.msgRepo.create({
+        conversationId,
+        senderId,
+        text: text?.trim() || null,
+        replyToId: replyToId ?? null,
+        mediaFileId: mediaFile?.id ?? null,
+        mediaType,
+        mediaName: mediaFile?.filename ?? null,
+        mediaMimeType: mediaFile?.mime ?? null,
+        mediaSize: mediaFile?.sizeBytes ? Number(mediaFile.sizeBytes) : null,
+        imageUrl: mediaFile?.mime.startsWith('image/') ? mediaFile.path : undefined,
+      }),
+    );
+    const conv = await this.convRepo.findOne({ where: { id: conversationId } });
+    if (conv) await this.convRepo.save(conv);
 
-    const msgs = await this.msgRepo.find({
-      where: { conversationId, deletedAt: IsNull() },
-      order: { createdAt: 'DESC' },
-    });
-
-    const mediaMsgs = msgs.filter((m) => m.mediaFileId);
-    const senderIds = [...new Set(mediaMsgs.map((m) => m.senderId))];
-    const userMap = await this.buildUserMap(senderIds);
-
-    const enriched = mediaMsgs.map((m) => this.buildEnrichedMessage(m, userMap, null));
-
-    return {
-      images: enriched.filter((m) => m.mediaType === 'image'),
-      videos: enriched.filter((m) => m.mediaType === 'video'),
-      audio: enriched.filter((m) => m.mediaType === 'audio'),
-      files: enriched.filter((m) => m.mediaType === 'file'),
-    };
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // MEMBER MANAGEMENT
-  // ─────────────────────────────────────────────────────────────────────────
-
-  async listMembers(conversationId: string, userId: string): Promise<MemberWithUser[]> {
-    await this.assertMember(conversationId, userId);
+    // Emit real-time event
     const members = await this.memRepo.find({ where: { conversationId } });
-    const userMap = await this.buildUserMap(members.map((m) => m.userId));
-
-    return members.map((m) => ({
-      userId: m.userId,
-      role: m.role,
-      user: userMap.has(m.userId)
-        ? this.toPublicUser(userMap.get(m.userId)!)
-        : { id: m.userId, firstName: 'Unknown', lastName: '', role: 'member', profileImageFileId: null },
-    }));
-  }
-
-  async addMembers(conversationId: string, adminId: string, userIds: string[]): Promise<void> {
-    await this.assertAdminMember(conversationId, adminId);
-    for (const uid of userIds) {
-      const exists = await this.memRepo.findOne({ where: { conversationId, userId: uid } });
-      if (!exists) {
-        await this.memRepo.save(this.memRepo.create({ conversationId, userId: uid, role: 'member' }));
+    for (const mem of members) {
+      if (mem.userId !== senderId) {
+        this.events.emitToUser(mem.userId, 'message:new', {
+          conversationId,
+          message: msg,
+        });
       }
     }
+
+    return msg;
   }
 
-  async removeMember(conversationId: string, requesterId: string, targetUserId: string): Promise<void> {
-    const requester = await this.memRepo.findOne({ where: { conversationId, userId: requesterId } });
-    if (!requester) throw new ForbiddenException('Not a member');
+  async editMessage(messageId: string, userId: string, text: string) {
+    const msg = await this.msgRepo.findOne({ where: { id: messageId } });
+    if (!msg) throw new ForbiddenException('Message not found');
+    if (msg.senderId !== userId) throw new ForbiddenException('You can only edit your own messages');
+    if (msg.deletedAt) throw new ForbiddenException('Message is deleted');
+    const trimmed = text?.trim();
+    if (!trimmed) throw new ForbiddenException('Message text is required');
+    msg.text = trimmed;
+    msg.editedAt = new Date();
+    await this.msgRepo.save(msg);
+    const members = await this.memRepo.find({ where: { conversationId: msg.conversationId } });
+    for (const mem of members) {
+      if (mem.userId !== userId) {
+        this.events.emitToUser(mem.userId, 'message:update', { conversationId: msg.conversationId, message: msg });
+      }
+    }
+    return msg;
+  }
 
-    // Admin can remove anyone; members can only remove themselves
-    if (requester.role !== 'admin' && requesterId !== targetUserId) {
-      throw new ForbiddenException('Admin role required to remove other members');
+  async deleteMessage(messageId: string, userId: string) {
+    const msg = await this.msgRepo.findOne({ where: { id: messageId } });
+    if (!msg) throw new ForbiddenException('Message not found');
+    if (msg.senderId !== userId) throw new ForbiddenException('You can only delete your own messages');
+    msg.deletedAt = new Date();
+    await this.msgRepo.save(msg);
+    const members = await this.memRepo.find({ where: { conversationId: msg.conversationId } });
+    for (const mem of members) {
+      if (mem.userId !== userId) {
+        this.events.emitToUser(mem.userId, 'message:delete', { conversationId: msg.conversationId, messageId });
+      }
+    }
+    return { ok: true };
+  }
+
+  async toggleReaction(messageId: string, userId: string, emoji: string) {
+    const msg = await this.msgRepo.findOne({ where: { id: messageId } });
+    if (!msg) throw new ForbiddenException('Message not found');
+
+    await this.assertMember(msg.conversationId, userId);
+    const reactions = { ...(msg.reactions ?? {}) } as Record<string, string[]>;
+    const users = new Set(reactions[emoji] ?? []);
+    if (users.has(userId)) {
+      users.delete(userId);
+    } else {
+      users.add(userId);
     }
 
-    await this.memRepo.delete({ conversationId, userId: targetUserId });
-
-    // Notify room of member change
-    const conv = await this.convRepo.findOne({ where: { id: conversationId } });
-    if (conv) {
-      const payload = await this.buildConversationPayload(conv, requesterId);
-      this.gateway.emitToConversation(conversationId, 'conversation:update', payload);
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // BLOCK SYSTEM
-  // ─────────────────────────────────────────────────────────────────────────
-
-  async blockUser(blockerId: string, blockedId: string): Promise<void> {
-    if (blockerId === blockedId) throw new BadRequestException('Cannot block yourself');
-    const exists = await this.blockRepo.findOne({ where: { blockerId, blockedId } });
-    if (!exists) {
-      await this.blockRepo.save(this.blockRepo.create({ blockerId, blockedId }));
-    }
-  }
-
-  async unblockUser(blockerId: string, blockedId: string): Promise<void> {
-    await this.blockRepo.delete({ blockerId, blockedId });
-  }
-
-  async listBlocked(userId: string): Promise<PublicUser[]> {
-    const blocks = await this.blockRepo.find({ where: { blockerId: userId } });
-    if (!blocks.length) return [];
-    const userMap = await this.buildUserMap(blocks.map((b) => b.blockedId));
-    return blocks
-      .filter((b) => userMap.has(b.blockedId))
-      .map((b) => this.toPublicUser(userMap.get(b.blockedId)!));
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // PRESENCE
-  // ─────────────────────────────────────────────────────────────────────────
-
-  async getPresence(userIds: string[]): Promise<Record<string, { isOnline: boolean; lastSeenAt: string | null }>> {
-    if (userIds.length > 100) throw new BadRequestException('Maximum 100 userIds allowed');
-    if (!userIds.length) return {};
-    const users = await this.convRepo.manager
-      .getRepository(User)
-      .find({ where: { id: In(userIds) } });
-
-    const result: Record<string, { isOnline: boolean; lastSeenAt: string | null }> = {};
-    for (const u of users) {
-      result[u.id] = {
-        isOnline: u.isOnline ?? false,
-        lastSeenAt: u.lastSeenAt ? u.lastSeenAt.toISOString() : null,
-      };
-    }
-    return result;
-  }
-
-  async setOnline(userId: string, isOnline: boolean): Promise<void> {
-    await this.convRepo.manager
-      .getRepository(User)
-      .update(userId, { isOnline, lastSeenAt: new Date() });
-  }
-
-  async getUserConversationIds(userId: string): Promise<string[]> {
-    const mems = await this.memRepo.find({ where: { userId } });
-    return mems.map((m) => m.conversationId);
-  }
-
-  async upsertReadRecord(userId: string, conversationId: string, messageId: string): Promise<void> {
-    await this.readRepo
-      .createQueryBuilder()
-      .insert()
-      .into(ConversationRead)
-      .values({
-        userId,
-        conversationId,
-        lastReadMessageId: messageId,
-        lastReadAt: new Date(),
-      })
-      .orUpdate(['last_read_message_id', 'last_read_at'], ['user_id', 'conversation_id'])
-      .execute();
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // MEDIA UPLOAD
-  // ─────────────────────────────────────────────────────────────────────────
-
-  async uploadChatMedia(file: Express.Multer.File, userId: string): Promise<MediaUploadResult> {
-    if (!file) throw new BadRequestException('No file provided');
-    if (file.size > MAX_MEDIA_BYTES) {
-      throw new PayloadTooLargeException('File exceeds 50 MB limit');
+    if (users.size === 0) {
+      delete reactions[emoji];
+    } else {
+      reactions[emoji] = [...users];
     }
 
-    const record = await this.filesService.uploadFile(file, userId);
-    const mediaType = this.deriveMediaType(record.mime);
-
-    return {
-      fileId: record.id,
-      url: record.path,
-      mimeType: record.mime,
-      size: record.sizeBytes ? Number(record.sizeBytes) : file.size,
-      name: record.filename,
-      mediaType,
-    };
+    msg.reactions = reactions;
+    await this.msgRepo.save(msg);
+    return msg;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // LEGACY / COMPAT METHODS (kept for backward compatibility)
-  // ─────────────────────────────────────────────────────────────────────────
-
-  async postMessage(conversationId: string, senderId: string, text: string): Promise<EnrichedMessage> {
-    return this.sendMessage(conversationId, senderId, { text });
-  }
-
-  async listMessages_legacy(conversationId: string, user: User, limit = 50, skip = 0) {
+  async listMessages(conversationId: string, user: User, limit = 50, skip = 0) {
     await this.assertReadAccess(conversationId, user);
-    const msgs = await this.msgRepo.find({
+    return this.msgRepo.find({
       where: { conversationId },
       order: { createdAt: 'DESC' },
       take: limit,
       skip,
     });
-    const userMap = await this.buildUserMap(msgs.map((m) => m.senderId));
-    return msgs.map((m) => this.buildEnrichedMessage(m, userMap, null));
   }
 
-  async getReadReceipts(messageId: string, user: User) {
-    const msg = await this.msgRepo.findOne({ where: { id: messageId } });
-    if (!msg) return [];
-    await this.assertReadAccess(msg.conversationId, user);
-    const members = await this.memRepo.find({ where: { conversationId: msg.conversationId } });
-    return members
-      .filter((m) => m.userId === msg.senderId)
-      .map((m) => ({ messageId: msg.id, userId: m.userId, readAt: msg.createdAt }));
+  async assertChildAccess(childId: string, parentId: string) {
+    const link = await this.psRepo.findOne({ where: { parentId, studentId: childId } });
+    if (!link) throw new ForbiddenException('Not your child');
+  }
+
+  async listChildConversations(childId: string, parentId: string) {
+    await this.assertChildAccess(childId, parentId);
+    const mems = await this.memRepo.find({ where: { userId: childId } });
+    const convIds = [...new Set(mems.map((m) => m.conversationId))];
+    if (!convIds.length) return [];
+    return this.convRepo.find({ where: { id: In(convIds) }, order: { updatedAt: 'DESC' } });
+  }
+
+  async listChildMessages(childId: string, conversationId: string, parentId: string, limit = 50, skip = 0) {
+    await this.assertChildAccess(childId, parentId);
+    const m = await this.memRepo.findOne({ where: { conversationId, userId: childId } });
+    if (!m) throw new ForbiddenException('Child is not a member of this conversation');
+    return this.msgRepo.find({
+      where: { conversationId },
+      order: { createdAt: 'DESC' },
+      take: limit,
+      skip,
+    });
   }
 
   async searchUsers(user: User, searchTerm: string) {
     const userRepo = this.convRepo.manager.getRepository(User);
     const qb = userRepo.createQueryBuilder('u');
+    
     if (searchTerm) {
-      qb.where('(u.firstName ILIKE :term OR u.lastName ILIKE :term OR u.subject ILIKE :term)', {
-        term: `%${searchTerm}%`,
-      });
+      qb.where('(u.firstName ILIKE :term OR u.lastName ILIKE :term OR u.subject ILIKE :term)', { term: `%${searchTerm}%` });
     }
-    qb.select(['u.id', 'u.firstName', 'u.lastName', 'u.role', 'u.subject', 'u.grade', 'u.section', 'u.profileImageFileId', 'u.childName']);
+    
+    // Admin sees everyone, others see admins + potentially related users 
+    // (For simplicity, we constrain non-admins to search admins/teachers unless we need deeper relationship graphs)
+    // We can allow all roles to be searched if queried, but limit the returned payload severely.
+    // The prompt says "no need to fetch all users", we limit by take(20).
+    
+    qb.select([
+      'u.id',
+      'u.firstName',
+      'u.lastName',
+      'u.role',
+      'u.subject',
+      'u.grade',
+      'u.section',
+      'u.profileImageFileId',
+      'u.childName'
+    ]);
+    
     qb.andWhere('u.id != :myId', { myId: user.id });
     qb.take(20);
+    
     return qb.getMany();
-  }
-
-  async setAllParentVisible() {
-    const result = await this.convRepo
-      .createQueryBuilder()
-      .update()
-      .set({ parentVisible: true })
-      .where('parent_visible = :v', { v: false })
-      .execute();
-    return { updated: result.affected ?? 0, message: 'All conversations are now visible to parents.' };
   }
 
   async listAllConversations(take = 50, skip = 0) {
     return this.convRepo.find({ order: { updatedAt: 'DESC' }, take, skip });
   }
 
-  async listChildConversations(parentId: string, studentId: string) {
-    const link = await this.psRepo.findOne({ where: { parentId, studentId } });
-    if (!link) throw new ForbiddenException('Not linked to this student');
-    const mems = await this.memRepo.find({ where: { userId: studentId } });
-    if (!mems.length) return [];
-    return this.convRepo.find({ where: { id: In(mems.map((m) => m.conversationId)) }, order: { updatedAt: 'DESC' } });
-  }
-
-  async listChildConversationMessages(parentId: string, studentId: string, conversationId: string, limit = 50, skip = 0) {
-    const link = await this.psRepo.findOne({ where: { parentId, studentId } });
-    if (!link) throw new ForbiddenException('Not linked to this student');
-    const mem = await this.memRepo.findOne({ where: { conversationId, userId: studentId } });
-    if (!mem) throw new ForbiddenException('Child is not a member of this conversation');
-    const messages = await this.msgRepo.find({
-      where: { conversationId },
-      order: { createdAt: 'DESC' },
-      take: limit,
-      skip,
-    });
-    return { conversationId, messages };
-  }
-
+  /** Initiate a direct conversation between two users */
   async initiateDirectChat(initiatorId: string, targetUserId: string, initiatorRole: UserRole) {
+    // Check if conversation already exists between these two users
     const initiatorConvs = await this.memRepo.find({ where: { userId: initiatorId } });
     const targetConvs = await this.memRepo.find({ where: { userId: targetUserId } });
+    
     const initiatorConvIds = new Set(initiatorConvs.map((m) => m.conversationId));
-    const sharedConvIds = targetConvs.filter((m) => initiatorConvIds.has(m.conversationId)).map((m) => m.conversationId);
+    const sharedConvIds = targetConvs
+      .filter((m) => initiatorConvIds.has(m.conversationId))
+      .map((m) => m.conversationId);
 
     if (sharedConvIds.length > 0) {
-      const existingDirects = await this.convRepo.find({ where: { id: In(sharedConvIds), type: 'direct' } });
+      // Check if any of these are direct conversations
+      const existingDirects = await this.convRepo.find({
+        where: { id: In(sharedConvIds), type: 'direct' },
+      });
+      
       if (existingDirects.length > 0) {
+        // Return the first existing direct conversation
         return { conversation: existingDirects[0], isNew: false };
       }
     }
 
+    // Create new direct conversation
     const userRepo = this.convRepo.manager.getRepository(User);
     const targetUser = await userRepo.findOne({ where: { id: targetUserId } });
     const initiatorUser = await userRepo.findOne({ where: { id: initiatorId } });
-    const title = `${initiatorUser?.firstName ?? 'User'} & ${targetUser?.firstName ?? 'User'}`;
-
+    
+    const initiatorName = `${initiatorUser?.firstName ?? ''} ${initiatorUser?.lastName ?? ''}`.trim() || 'User';
+    const targetName = `${targetUser?.firstName ?? ''} ${targetUser?.lastName ?? ''}`.trim() || 'User';
+    const title = `${initiatorName} & ${targetName}`;
+    
     const conversation = await this.createConversation(
-      { type: 'direct', title, classOfferingId: null, parentVisible: true, createdById: initiatorId },
+      {
+        type: 'direct',
+        title,
+        classOfferingId: null,
+        parentVisible: initiatorRole === UserRole.PARENT || initiatorRole === UserRole.STUDENT,
+        createdById: initiatorId,
+      },
       [targetUserId],
     );
+
     return { conversation, isNew: true };
   }
 }

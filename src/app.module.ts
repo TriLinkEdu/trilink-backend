@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import appConfig from './config/app.config';
 import { DatabaseModule } from './database/database.module';
+import { CacheModule } from './cache/cache.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { AcademicYearsModule } from './modules/academic-years/academic-years.module';
@@ -35,6 +36,8 @@ import { HealthModule } from './modules/health/health.module';
 import { GradesModule } from './modules/grades/grades.module';
 import { AssignmentsModule } from './modules/assignments/assignments.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
+import { HomeroomModule } from './modules/homeroom/homeroom.module';
+import { ReportCardsModule } from './modules/report-cards/report-cards.module';
 // Modules added by other team members
 import { TextbooksModule } from './modules/textbooks/textbooks.module';
 import { LearningMaterialsModule } from './modules/learning-materials/learning-materials.module';
@@ -46,6 +49,7 @@ import { SearchModule } from './modules/search/search.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [appConfig] }),
+    CacheModule,
     HealthModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRootAsync({
@@ -97,6 +101,8 @@ import { SearchModule } from './modules/search/search.module';
     ResourcesModule,
     CurriculumModule,
     SearchModule,
+    HomeroomModule,
+    ReportCardsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

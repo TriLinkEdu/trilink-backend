@@ -22,6 +22,8 @@ import { Notification } from '../modules/notifications/entities/notification.ent
 import { Conversation } from '../modules/chat/entities/conversation.entity';
 import { ConversationMember } from '../modules/chat/entities/conversation-member.entity';
 import { ChatMessage } from '../modules/chat/entities/chat-message.entity';
+import { ChatConnection } from '../modules/chat/entities/chat-connection.entity';
+import { BlockedUser } from '../modules/chat/entities/blocked-user.entity';
 import { ConversationRead } from '../modules/chat/entities/conversation-read.entity';
 import { UserBlock } from '../modules/chat/entities/user-block.entity';
 import { UserSettings } from '../modules/settings/entities/user-settings.entity';
@@ -31,11 +33,15 @@ import { AuditLog } from '../modules/audit/entities/audit-log.entity';
 import { Badge } from '../modules/gamification/entities/badge.entity';
 import { UserBadge } from '../modules/gamification/entities/user-badge.entity';
 import { LoginStreak } from '../modules/gamification/entities/login-streak.entity';
+import { Achievement } from '../modules/gamification/entities/achievement.entity';
+import { UserAchievement } from '../modules/gamification/entities/user-achievement.entity';
 import { StudentGoal } from '../modules/goals/entities/student-goal.entity';
 import { StudentProfile } from '../modules/student-profiles/entities/student-profile.entity';
 import { GradeEntry } from '../modules/grades/entities/grade-entry.entity';
 import { Assignment } from '../modules/assignments/entities/assignment.entity';
 import { AssignmentSubmission } from '../modules/assignments/entities/assignment-submission.entity';
+import { HomeroomAssignment } from '../modules/homeroom/entities/homeroom-assignment.entity';
+import { ReportCardRemark } from '../modules/report-cards/entities/report-card-remark.entity';
 // Entities added by other team members
 import { Textbook } from '../modules/textbooks/entities/textbook.entity';
 import { LearningMaterial } from '../modules/learning-materials/entities/learning-material.entity';
@@ -66,6 +72,8 @@ export const TYPEORM_ENTITIES = [
   Conversation,
   ConversationMember,
   ChatMessage,
+  ChatConnection,
+  BlockedUser,
   ConversationRead,
   UserBlock,
   UserSettings,
@@ -75,11 +83,15 @@ export const TYPEORM_ENTITIES = [
   Badge,
   UserBadge,
   LoginStreak,
+  Achievement,
+  UserAchievement,
   StudentGoal,
   StudentProfile,
   GradeEntry,
   Assignment,
   AssignmentSubmission,
+  HomeroomAssignment,
+  ReportCardRemark,
   // Entities added by other team members
   Textbook,
   LearningMaterial,

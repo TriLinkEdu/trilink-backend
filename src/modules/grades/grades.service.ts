@@ -83,6 +83,7 @@ export class GradesService {
       maxScore?: number;
       note?: string | null;
       examAttemptId?: string | null;
+      termId?: string | null;
     },
     teacher: User,
   ) {
@@ -104,6 +105,7 @@ export class GradesService {
       maxScore: body.maxScore ?? 100,
       note: body.note ?? null,
       examAttemptId: body.examAttemptId ?? null,
+      termId: body.termId ?? null,
     });
     return this.repo.save(entry);
   }
@@ -119,6 +121,7 @@ export class GradesService {
       type: GradeEntryType;
       maxScore: number;
       note?: string | null;
+      termId?: string | null;
       entries: { studentId: string; score: number | null }[];
     },
     teacher: User,
@@ -134,6 +137,7 @@ export class GradesService {
         existing.score = e.score;
         existing.maxScore = body.maxScore;
         existing.note = body.note ?? existing.note;
+        if (body.termId !== undefined) existing.termId = body.termId;
         saved.push(await this.repo.save(existing));
       } else {
         const entry = this.repo.create({
@@ -145,6 +149,7 @@ export class GradesService {
           score: e.score,
           maxScore: body.maxScore,
           note: body.note ?? null,
+          termId: body.termId ?? null,
         });
         saved.push(await this.repo.save(entry));
       }
@@ -210,6 +215,34 @@ export class GradesService {
       }
     }
     return { released: entries.length };
+  }
+
+  /**
+   * Delete a single grade entry.
+   */
+  async deleteEntry(id: string, viewer: User) {
+    const entry = await this.repo.findOne({ where: { id } });
+    if (!entry) throw new NotFoundException('Grade entry not found');
+    if (viewer.role !== UserRole.ADMIN) {
+      if (entry.teacherId !== viewer.id) {
+        await this.assertTeacherOwnsClass(viewer, entry.classOfferingId);
+      }
+    }
+    await this.repo.remove(entry);
+    return { ok: true };
+  }
+
+  /**
+   * Delete an entire assessment (all entries with the given classOfferingId + title).
+   */
+  async deleteGroup(filter: { classOfferingId: string; title: string }, viewer: User) {
+    await this.assertTeacherOwnsClass(viewer, filter.classOfferingId);
+    const entries = await this.repo.find({
+      where: { classOfferingId: filter.classOfferingId, title: filter.title },
+    });
+    if (entries.length === 0) throw new NotFoundException('Assessment not found');
+    await this.repo.remove(entries);
+    return { ok: true, deleted: entries.length };
   }
 
   // ── Queries ───────────────────────────────────────────────────────────────
@@ -335,6 +368,77 @@ export class GradesService {
       : entries.filter((e) => e.releasedAt != null);
 
     return Promise.all(visible.map((e) => this.enrichEntry(e)));
+  }
+
+  /**
+   * Get all released grade entries for a student filtered by termId.
+   * Groups by subject.
+   */
+  async listForStudentByTerm(studentId: string, termId: string, viewer: User) {
+    if (viewer.role === UserRole.STUDENT && viewer.id !== studentId) {
+      throw new ForbiddenException('Cannot view another student\'s grades');
+    }
+    if (viewer.role === UserRole.PARENT) {
+      const link = await this.psRepo.findOne({ where: { parentId: viewer.id, studentId } });
+      if (!link) throw new ForbiddenException('Not linked to this student');
+    }
+
+    const entries = await this.repo.find({
+      where: { studentId, termId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const visible =
+      viewer.role === UserRole.ADMIN || viewer.role === UserRole.TEACHER
+        ? entries
+        : entries.filter((e) => e.releasedAt != null);
+
+    // Group by subject via classOffering
+    const subjectMap = new Map<
+      string,
+      { subjectId: string; subjectName: string; entries: typeof visible }
+    >();
+
+    for (const e of visible) {
+      const co = await this.coRepo.findOne({ where: { id: e.classOfferingId } });
+      if (!co) continue;
+      const subject = await this.subjectRepo.findOne({ where: { id: co.subjectId } });
+      const key = co.subjectId;
+      if (!subjectMap.has(key)) {
+        subjectMap.set(key, {
+          subjectId: co.subjectId,
+          subjectName: subject?.name ?? 'Unknown',
+          entries: [],
+        });
+      }
+      subjectMap.get(key)!.entries.push(e);
+    }
+
+    const student = await this.userRepo.findOne({ where: { id: studentId } });
+
+    return {
+      studentId,
+      studentName: student ? `${student.firstName} ${student.lastName}` : null,
+      termId,
+      subjects: [...subjectMap.values()].map((s) => ({
+        subjectId: s.subjectId,
+        subjectName: s.subjectName,
+        entries: s.entries.map((e) => ({
+          id: e.id,
+          title: e.title,
+          type: e.type,
+          score: e.score,
+          maxScore: e.maxScore,
+          percent:
+            e.score != null && e.maxScore > 0
+              ? Math.round((e.score / e.maxScore) * 1000) / 10
+              : null,
+          note: e.note,
+          releasedAt: e.releasedAt,
+          createdAt: e.createdAt,
+        })),
+      })),
+    };
   }
 
   /**

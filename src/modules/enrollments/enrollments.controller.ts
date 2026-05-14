@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ApiProperty } from '@nestjs/swagger';
-import { IsUUID } from 'class-validator';
+import { IsArray, IsOptional, IsUUID } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -14,6 +14,27 @@ class EnrollDto {
   @ApiProperty() @IsUUID() studentId: string;
   @ApiProperty() @IsUUID() classOfferingId: string;
   @ApiProperty() @IsUUID() academicYearId: string;
+}
+
+class AssignStudentsToSectionDto {
+  @ApiProperty({ required: false, description: 'Defaults to the active academic year if omitted' })
+  @IsOptional()
+  @IsUUID()
+  academicYearId?: string;
+
+  @ApiProperty() @IsUUID() gradeId: string;
+  @ApiProperty() @IsUUID() sectionId: string;
+  @ApiProperty({ type: [String], description: 'Student UUIDs to move into the section' })
+  @IsArray()
+  @IsUUID('4', { each: true })
+  studentIds: string[];
+}
+
+class ClearStudentsSectionDto {
+  @ApiProperty({ type: [String], description: 'Student UUIDs to clear section for' })
+  @IsArray()
+  @IsUUID('4', { each: true })
+  studentIds: string[];
 }
 
 @ApiTags('Enrollments')
@@ -131,6 +152,24 @@ export class EnrollmentsController {
   @Roles(UserRole.ADMIN)
   create(@Body() dto: EnrollDto) {
     return this.svc.create(dto);
+  }
+
+  @Post('assign-section')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Assign students to a section and enroll them in all section class offerings',
+    description:
+      'Updates the selected students to the chosen grade/section and creates enrollments for every class offering in that section for the active academic year.',
+  })
+  assignSection(@Body() dto: AssignStudentsToSectionDto) {
+    return this.svc.assignStudentsToSection(dto);
+  }
+
+  @Post('clear-section')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: "Clear students' section and remove their enrollments for that section" })
+  clearSection(@Body() dto: ClearStudentsSectionDto) {
+    return this.svc.clearStudentsSection(dto);
   }
 
   @Delete(':id')

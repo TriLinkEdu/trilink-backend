@@ -141,8 +141,9 @@ export class UsersController {
 
   @Patch('me')
   @ApiOperation({ summary: 'Update own profile' })
-  patchMe(@CurrentUser() user: User, @Body() body: PatchUserDto) {
-    return this.users.patchUser(user.id, body);
+  async patchMe(@CurrentUser() user: User, @Body() body: PatchUserDto) {
+    const updated = await this.users.patchUser(user.id, body);
+    return this.users.toPublicWithImage(updated);
   }
 
   @Patch(':id')

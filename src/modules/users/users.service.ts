@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -12,19 +11,13 @@ import * as bcrypt from 'bcrypt';
 import { User, UserRole } from './entities/user.entity';
 import { RegisterByAdminDto } from './dto/register-by-admin.dto';
 import { ParentStudentsService } from '../parent-students/parent-students.service';
-import { EmailService } from '../email/email.service';
-import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class UsersService {
-  private readonly logger = new Logger(UsersService.name);
-
   constructor(
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     private readonly parentStudents: ParentStudentsService,
-    private readonly emailService: EmailService,
-    private readonly config: ConfigService,
   ) {}
 
   async findByEmail(email: string): Promise<User | null> {
@@ -85,7 +78,6 @@ export class UsersService {
       user.department = dto.department ?? null;
     } else if (role === UserRole.PARENT) {
       user.childName = dto.childName ?? null;
-      user.relationship = dto.relationship ?? null;
     }
 
     const saved = await this.userRepo.save(user);
@@ -99,26 +91,7 @@ export class UsersService {
       });
     }
 
-    // Send welcome email with temporary password
-    const loginUrl = this.config.get<string>('LOGIN_URL', 'http://localhost:3000/login');
-    const emailResult = await this.emailService.sendWelcomeEmail({
-      recipientEmail: saved.email,
-      recipientName: `${saved.firstName} ${saved.lastName}`,
-      username: saved.email,
-      temporaryPassword: tempPassword,
-      loginUrl,
-      role: saved.role,
-    });
-
-    if (emailResult.success) {
-      this.logger.log(`Welcome email sent successfully to ${saved.email}`);
-    } else {
-      this.logger.error(`Failed to send welcome email to ${saved.email}: ${emailResult.error}`);
-      // Don't throw error - user is already created, just log the failure
-    }
-
     (saved as any).tempPassword = tempPassword;
-    (saved as any).emailSent = emailResult.success;
     return saved;
   }
 
@@ -140,6 +113,13 @@ export class UsersService {
   toPublic(u: User) {
     const { passwordHash: _p, ...rest } = u;
     return rest;
+  }
+
+  async toPublicWithImage(u: User) {
+    return {
+      ...this.toPublic(u),
+      profileImagePath: null,
+    };
   }
 
   async listUsers(filters: { role?: UserRole; q?: string }): Promise<Partial<User>[]> {
@@ -187,7 +167,6 @@ export class UsersService {
         | 'postalCode'
         | 'officeRoom'
         | 'childName'
-        | 'relationship'
       >
     >,
   ) {
@@ -210,7 +189,6 @@ export class UsersService {
       'postalCode',
       'officeRoom',
       'childName',
-      'relationship',
     ] as const satisfies readonly (keyof User)[];
 
     for (const key of keys) {

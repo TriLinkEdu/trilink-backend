@@ -3,11 +3,18 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Badge } from './entities/badge.entity';
 import { UserBadge } from './entities/user-badge.entity';
 import { LoginStreak } from './entities/login-streak.entity';
+import { Achievement } from './entities/achievement.entity';
+import { UserAchievement } from './entities/user-achievement.entity';
 import { ExamAttempt } from '../exams/entities/exam-attempt.entity';
 import { User } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
 import { AttendanceSession } from '../attendance/entities/attendance-session.entity';
 import { AttendanceMark } from '../attendance/entities/attendance-mark.entity';
+import { Enrollment } from '../enrollments/entities/enrollment.entity';
+import { Subject } from '../school-structure/entities/subject.entity';
+import { Question } from '../exams/entities/question.entity';
+import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
+import { Topic } from '../topics/entities/topic.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { GamificationService } from './gamification.service';
 import { GamificationController } from './gamification.controller';
@@ -17,12 +24,19 @@ import { GamificationController } from './gamification.controller';
     TypeOrmModule.forFeature([
       Badge,
       UserBadge,
+      Achievement,
+      UserAchievement,
       ExamAttempt,
       User,
       ParentStudent,
       AttendanceSession,
       AttendanceMark,
       LoginStreak,
+      Enrollment,
+      Subject,
+      Question,
+      ClassOffering,
+      Topic,
     ]),
     NotificationsModule,
   ],

@@ -26,6 +26,7 @@ export interface TokenResponse {
     lastName: string;
     mustChangePassword: boolean;
     profileImageFileId: string | null;
+    profileImagePath: string | null;
   };
 }
 
@@ -51,7 +52,7 @@ export class AuthService {
     const valid = await this.usersService.validatePassword(user, dto.password);
     if (!valid) throw new UnauthorizedException('Invalid email or password');
 
-    const res = this.buildTokenResponse(user);
+    const res = await this.buildTokenResponse(user);
     void this.safeAudit(
       user.id,
       'user.login',
@@ -81,7 +82,7 @@ export class AuthService {
       if (payload.type !== 'refresh') throw new UnauthorizedException('Invalid token');
       const user = await this.usersService.findById(payload.sub);
       if (!user) throw new UnauthorizedException('User not found');
-      return this.buildTokenResponse(user);
+      return await this.buildTokenResponse(user);
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
@@ -92,7 +93,7 @@ export class AuthService {
     return this.usersService.findById(payload.sub);
   }
 
-  private buildTokenResponse(user: User): TokenResponse {
+  private async buildTokenResponse(user: User): Promise<TokenResponse> {
     const payloadBase = { sub: user.id, email: user.email, role: user.role };
     const accessToken = this.jwtService.sign(
       { ...payloadBase, type: 'access' },
@@ -103,6 +104,11 @@ export class AuthService {
       { expiresIn: this.config.get<string>('jwt.refreshExpires') },
     );
     const expiresIn = 900; // 15 min in seconds; could parse from accessExpires
+
+    // Resolve profile image path from file record
+    const publicUser = await this.usersService.toPublicWithImage(user);
+    const profileImagePath = (publicUser as any).profileImagePath ?? null;
+
     return {
       accessToken,
       refreshToken,
@@ -115,6 +121,7 @@ export class AuthService {
         lastName: user.lastName,
         mustChangePassword: user.mustChangePassword,
         profileImageFileId: user.profileImageFileId ?? null,
+        profileImagePath,
       },
     };
   }

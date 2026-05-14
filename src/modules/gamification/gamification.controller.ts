@@ -27,6 +27,14 @@ class CreateBadgeDto {
   @ApiProperty({ required: false }) @IsOptional() @IsNumber() pointsValue?: number;
 }
 
+class SubmitGamificationQuizDto {
+  @ApiProperty({
+    example: { 'q-1': 2, 'q-2': 1 },
+    description: 'Map of questionId to selected option index',
+  })
+  answers: Record<string, number>;
+}
+
 @ApiTags('Gamification')
 @Controller('gamification')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -118,5 +126,75 @@ export class GamificationController {
   streakLeaderboard(@Query('limit') limit?: string) {
     const n = parseInt(limit ?? '', 10);
     return this.gam.leaderboardStreaks(Number.isFinite(n) ? n : 20);
+  }
+
+  @Get('me/missions')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'List daily missions for current student' })
+  missions(@CurrentUser() user: User) {
+    return this.gam.listDailyMissions(user.id);
+  }
+
+  @Post('me/missions/:missionId/complete')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'Mark mission completed for current student' })
+  completeMission(
+    @CurrentUser() user: User,
+    @Param('missionId') missionId: string,
+  ) {
+    return this.gam.completeMission(user.id, missionId);
+  }
+
+  @Get('me/team-challenge')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'Get current team challenge for student' })
+  teamChallenge(@CurrentUser() user: User) {
+    return this.gam.teamChallenge(user.id);
+  }
+
+  @Get('quizzes')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'List available gamification quizzes for current student' })
+  quizzes(@CurrentUser() user: User) {
+    return this.gam.listQuizzesForStudent(user);
+  }
+
+  @Get('achievements')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({ summary: 'List all achievements' })
+  listAchievements() {
+    return this.gam.listAchievements();
+  }
+
+  @Get('my-achievements')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'List current user achievements' })
+  myAchievements(@CurrentUser() user: User) {
+    return this.gam.listUserAchievements(user.id);
+  }
+
+  @Post('check-achievements')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'Check and unlock new achievements' })
+  checkAchievements(@CurrentUser() user: User) {
+    return this.gam.checkAndUnlockAchievements(user.id);
+  }
+
+  @Get('quizzes/:id')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'Get quiz detail for current student' })
+  quizById(@CurrentUser() user: User, @Param('id') id: string) {
+    return this.gam.quizByIdForStudent(user, id);
+  }
+
+  @Post('quizzes/:id/submit')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'Submit quiz answers and apply gamification outcome' })
+  submitQuiz(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Body() body: SubmitGamificationQuizDto,
+  ) {
+    return this.gam.submitQuizForStudent(user, id, body.answers || {});
   }
 }
