@@ -26,6 +26,9 @@ export class CalendarEvent {
   @Column({ name: 'class_offering_id', type: 'uuid', nullable: true })
   classOfferingId: string | null;
 
+  @Column({ name: 'term_id', type: 'uuid', nullable: true })
+  termId: string | null;
+
   @Column({ name: 'created_by_id', type: 'uuid' })
   createdById: string;
 

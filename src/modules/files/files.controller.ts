@@ -4,7 +4,6 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
-  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -22,8 +21,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { FilesService } from './files.service';
 import { UsersService } from '../users/users.service';
-import { FileAccessQueryDto } from './dto/file-access-query.dto';
-import { FileAccessResponseDto } from './dto/file-access-response.dto';
+import { randomUUID } from 'crypto';
 
 import { Public } from '../../common/decorators/public.decorator';
 
@@ -54,7 +52,14 @@ export class FilesController {
     }),
   )
   async upload(@UploadedFile() file: Express.Multer.File, @CurrentUser() user: User) {
-    return this.files.uploadFile(file, user.id);
+    const uploadedFile = await this.files.uploadFile(file, user.id);
+    
+    // Automatically bind the newly uploaded image as the user's profile picture
+    if (file.mimetype.startsWith('image/')) {
+      await this.users.patchUser(user.id, { profileImageFileId: uploadedFile.id });
+    }
+    
+    return uploadedFile;
   }
 
   @Get(':id')
@@ -63,31 +68,11 @@ export class FilesController {
     return this.files.get(id);
   }
 
-  @Get(':id/access')
-  @ApiOperation({ summary: 'Get file access metadata and URL for app viewer/cache' })
-  async access(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Query() query: FileAccessQueryDto,
-  ): Promise<FileAccessResponseDto> {
-    return this.files.getAccessMetadata(id, {
-      expiresInSeconds: query.expiresInSeconds,
-    });
-  }
-
   @Public()
   @Get(':id/download')
-  @ApiOperation({ summary: 'Download or view file — redirects to Cloudinary URL' })
+  @ApiOperation({ summary: 'Download file content (authenticated)' })
   async download(@Param('id', ParseUUIDPipe) id: string, @Res() res: Response) {
     const rec = await this.files.getOrThrow(id);
-    // Redirect directly to the Cloudinary URL so the browser handles it natively
     return res.redirect(rec.path);
-  }
-
-  @Public()
-  @Get(':id/url')
-  @ApiOperation({ summary: 'Get the direct file URL (Cloudinary)' })
-  async getUrl(@Param('id', ParseUUIDPipe) id: string) {
-    const rec = await this.files.getOrThrow(id);
-    return { url: rec.path, filename: rec.filename, mime: rec.mime };
   }
 }

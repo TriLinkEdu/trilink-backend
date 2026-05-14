@@ -1,4 +1,4 @@
-import { Controller, Get, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -31,8 +31,8 @@ export class DashboardsController {
 
   @Get('teacher')
   @Roles(UserRole.TEACHER)
-  teacher(@CurrentUser() user: User) {
-    return this.dash.teacher(user.id);
+  teacher(@CurrentUser() user: User, @Query('termId') termId?: string) {
+    return this.dash.teacher(user.id, termId);
   }
 
   @Get('student')

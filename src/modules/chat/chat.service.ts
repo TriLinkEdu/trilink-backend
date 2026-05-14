@@ -249,7 +249,7 @@ export class ChatService {
     return this.convRepo.findOne({ where: { id } });
   }
 
-  async postMessage(conversationId: string, senderId: string, text?: string | null, mediaFileId?: string | null) {
+  async postMessage(conversationId: string, senderId: string, text?: string | null, mediaFileId?: string | null, replyToId?: string | null) {
     await this.assertMember(conversationId, senderId);
     const blockState = await this.getBlockState(conversationId, senderId);
     if (blockState.blockedByMe || blockState.blockedMe) {
@@ -276,6 +276,7 @@ export class ChatService {
         conversationId,
         senderId,
         text: text?.trim() || null,
+        replyToId: replyToId ?? null,
         mediaFileId: mediaFile?.id ?? null,
         mediaType,
         mediaName: mediaFile?.filename ?? null,
@@ -298,6 +299,64 @@ export class ChatService {
       }
     }
 
+    return msg;
+  }
+
+  async editMessage(messageId: string, userId: string, text: string) {
+    const msg = await this.msgRepo.findOne({ where: { id: messageId } });
+    if (!msg) throw new ForbiddenException('Message not found');
+    if (msg.senderId !== userId) throw new ForbiddenException('You can only edit your own messages');
+    if (msg.deletedAt) throw new ForbiddenException('Message is deleted');
+    const trimmed = text?.trim();
+    if (!trimmed) throw new ForbiddenException('Message text is required');
+    msg.text = trimmed;
+    msg.editedAt = new Date();
+    await this.msgRepo.save(msg);
+    const members = await this.memRepo.find({ where: { conversationId: msg.conversationId } });
+    for (const mem of members) {
+      if (mem.userId !== userId) {
+        this.events.emitToUser(mem.userId, 'message:update', { conversationId: msg.conversationId, message: msg });
+      }
+    }
+    return msg;
+  }
+
+  async deleteMessage(messageId: string, userId: string) {
+    const msg = await this.msgRepo.findOne({ where: { id: messageId } });
+    if (!msg) throw new ForbiddenException('Message not found');
+    if (msg.senderId !== userId) throw new ForbiddenException('You can only delete your own messages');
+    msg.deletedAt = new Date();
+    await this.msgRepo.save(msg);
+    const members = await this.memRepo.find({ where: { conversationId: msg.conversationId } });
+    for (const mem of members) {
+      if (mem.userId !== userId) {
+        this.events.emitToUser(mem.userId, 'message:delete', { conversationId: msg.conversationId, messageId });
+      }
+    }
+    return { ok: true };
+  }
+
+  async toggleReaction(messageId: string, userId: string, emoji: string) {
+    const msg = await this.msgRepo.findOne({ where: { id: messageId } });
+    if (!msg) throw new ForbiddenException('Message not found');
+
+    await this.assertMember(msg.conversationId, userId);
+    const reactions = { ...(msg.reactions ?? {}) } as Record<string, string[]>;
+    const users = new Set(reactions[emoji] ?? []);
+    if (users.has(userId)) {
+      users.delete(userId);
+    } else {
+      users.add(userId);
+    }
+
+    if (users.size === 0) {
+      delete reactions[emoji];
+    } else {
+      reactions[emoji] = [...users];
+    }
+
+    msg.reactions = reactions;
+    await this.msgRepo.save(msg);
     return msg;
   }
 

@@ -108,7 +108,7 @@ export class DashboardsService {
     };
   }
 
-  async teacher(userId: string) {
+  async teacher(userId: string, termId?: string) {
     const myClasses = await this.classes.count({ where: { teacherId: userId } });
 
     const studentsRaw = await this.enr
@@ -120,8 +120,18 @@ export class DashboardsService {
       .getRawOne();
     const totalStudents = parseInt(studentsRaw?.count || '0', 10);
 
-    const publishedExams = await this.exams.count({ where: { createdById: userId, published: true } });
-    const recentAnnouncements = await this.announcements.count({ where: { authorId: userId } });
+    const examCountQb = this.exams
+      .createQueryBuilder('e')
+      .where('e.created_by_id = :uid', { uid: userId })
+      .andWhere('e.published = :pub', { pub: true });
+    if (termId) examCountQb.andWhere('e.term_id = :tid', { tid: termId });
+    const publishedExams = await examCountQb.getCount();
+
+    const annCountQb = this.announcements
+      .createQueryBuilder('a')
+      .where('a.author_id = :uid', { uid: userId });
+    if (termId) annCountQb.andWhere('(a.term_id IS NULL OR a.term_id = :tid)', { tid: termId });
+    const recentAnnouncements = await annCountQb.getCount();
 
     const pendingGrade = await this.attempts
       .createQueryBuilder('a')
@@ -129,6 +139,7 @@ export class DashboardsService {
       .where('a.submitted_at IS NOT NULL')
       .andWhere('a.score IS NULL')
       .andWhere('e.created_by_id = :uid', { uid: userId })
+      .andWhere(termId ? 'e.term_id = :tid' : '1=1', termId ? { tid: termId } : {})
       .getCount();
 
     const thirtyDaysAgo = new Date();
@@ -141,6 +152,7 @@ export class DashboardsService {
       .innerJoin('class_offerings', 'co', 'co.id = s.class_offering_id')
       .where('co.teacher_id = :uid', { uid: userId })
       .andWhere('s.date >= :date', { date: dateStr })
+      .andWhere(termId ? '(s.term_id = :tid)' : '1=1', termId ? { tid: termId } : {})
       .select('m.status', 'status')
       .addSelect('COUNT(*)', 'count')
       .groupBy('m.status')
