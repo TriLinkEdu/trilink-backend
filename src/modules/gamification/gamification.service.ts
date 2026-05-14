@@ -194,7 +194,12 @@ export class GamificationService implements OnModuleInit {
   }
 
   listBadges() {
-    return this.badgeRepo.find({ order: { name: 'ASC' } });
+    return this.badgeRepo
+      .createQueryBuilder('b')
+      .where("b.key NOT LIKE 'quiz_reward_%'")
+      .andWhere("b.key NOT LIKE 'mission_%'")
+      .orderBy('b.name', 'ASC')
+      .getMany();
   }
 
   async createBadge(body: { key: string; name: string; description?: string; iconKey?: string; pointsValue?: number }) {
@@ -893,6 +898,13 @@ export class GamificationService implements OnModuleInit {
 
   async quizByIdForStudent(user: User, quizId: string) {
     if (user.role !== UserRole.STUDENT) throw new ForbiddenException('Only students can access quizzes');
+    
+    const cacheKey = `quiz:${user.id}:${quizId}`;
+    const cachedQuiz = await this.cacheManager.get<any>(cacheKey);
+    if (cachedQuiz) {
+      return cachedQuiz;
+    }
+
     const subjectId = quizId.replace(/^quiz-/, '');
 
     // Primary: subjects via active enrollments
@@ -991,7 +1003,7 @@ export class GamificationService implements OnModuleInit {
       );
     }
 
-    return {
+    const result = {
       id            : quizId,
       title         : `${subject.name} Quick Quiz`,
       subjectId     : subject.id,
@@ -1004,6 +1016,9 @@ export class GamificationService implements OnModuleInit {
       lifecycleState: 'published',
       isTimeLimited : true,
     };
+    
+    await this.cacheManager.set(cacheKey, result, 3600000); // 1 hour cache
+    return result;
   }
 
   async submitQuizForStudent(
@@ -1065,6 +1080,10 @@ export class GamificationService implements OnModuleInit {
       await this.xpService.awardXp(user.id, delta, 'quiz', quizId);
     }
 
+    // Fire-and-forget: propagate per-question correctness to BKT mastery model.
+    // Uses subjectId as topic_id proxy (best granularity without per-question topic mapping).
+    this.pushMasteryUpdates(user.id, quiz.subjectId, typedQuestions, answers).catch(() => undefined);
+
     const newlyUnlocked = await this.checkAndUnlockAchievements(user.id);
     const newAchievementIds = [
       ...new Set([
@@ -1076,6 +1095,9 @@ export class GamificationService implements OnModuleInit {
     const afterXp = beforeXp + delta;
     const afterLevel = this.levelFromXp(afterXp);
     const afterRank = await this.badgeLeaderboardRank(user.id);
+
+    const cacheKey = `quiz:${user.id}:${quizId}`;
+    await this.cacheManager.del(cacheKey);
 
     return {
       result: {
@@ -1098,6 +1120,33 @@ export class GamificationService implements OnModuleInit {
         leaderboardAfterRank: afterRank,
       },
     };
+  }
+
+  private async pushMasteryUpdates(
+    studentId: string,
+    topicId: string,
+    questions: Array<{ id: string; correctIndex: number }>,
+    answers: Record<string, number>,
+  ): Promise<void> {
+    const baseUrl = (process.env.AI_SERVICE_URL ?? '').trim().replace(/\/$/, '');
+    if (!baseUrl) return;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const apiKey = (process.env.INTERNAL_API_KEY ?? '').trim();
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    await Promise.allSettled(
+      questions.map((q) =>
+        fetch(`${baseUrl}/api/ai/mastery/update`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            student_id: studentId,
+            topic_id: topicId,
+            is_correct: answers[q.id] === q.correctIndex,
+          }),
+          signal: AbortSignal.timeout(5_000),
+        }),
+      ),
+    );
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)

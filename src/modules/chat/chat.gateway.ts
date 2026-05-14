@@ -22,7 +22,12 @@ interface AuthenticatedSocket extends Socket {
 
 @Injectable()
 @WebSocketGateway({
-  cors: { origin: '*', credentials: true },
+  cors: {
+    origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+      cb(null, true);
+    },
+    credentials: true,
+  },
   namespace: '/',
 })
 export class ChatGateway

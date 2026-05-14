@@ -10,7 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsNumber, IsObject, IsOptional, IsString, MinLength } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -33,6 +33,8 @@ class SubmitGamificationQuizDto {
     example: { 'q-1': 2, 'q-2': 1 },
     description: 'Map of questionId to selected option index',
   })
+  @IsObject()
+  @IsOptional()
   answers: Record<string, number>;
 }
 

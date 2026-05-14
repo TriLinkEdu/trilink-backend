@@ -8,7 +8,7 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, IsNull, LessThan, Repository } from 'typeorm';
+import { Brackets, In, IsNull, Repository } from 'typeorm';
 import { Conversation } from './entities/conversation.entity';
 import { ConversationMember } from './entities/conversation-member.entity';
 import { ChatMessage } from './entities/chat-message.entity';
@@ -255,14 +255,6 @@ export class ChatService {
     const readRecord = await this.readRepo.findOne({ where: { userId, conversationId: conv.id } });
     let unreadCount = 0;
     if (readRecord?.lastReadAt) {
-      unreadCount = await this.msgRepo.count({
-        where: {
-          conversationId: conv.id,
-          createdAt: LessThan(new Date()) as any,
-          deletedAt: IsNull(),
-        },
-      });
-      // More precise: count messages after lastReadAt not sent by user
       const qb = this.msgRepo.createQueryBuilder('m')
         .where('m.conversation_id = :cid', { cid: conv.id })
         .andWhere('m.created_at > :since', { since: readRecord.lastReadAt })
@@ -430,7 +422,7 @@ export class ChatService {
       }
     }
     const enrichedEdit = this.buildEnrichedMessage(msg, userMap, replyMsg);
-    this.gateway.emitToConversation(msg.conversationId, 'message:new', enrichedEdit);
+    this.gateway.emitToConversation(msg.conversationId, 'message:edited', enrichedEdit);
     return enrichedEdit;
   }
 
@@ -456,7 +448,7 @@ export class ChatService {
 
     const userMap = await this.buildUserMap([msg.senderId]);
     const enrichedDel = this.buildEnrichedMessage(msg, userMap, null);
-    this.gateway.emitToConversation(msg.conversationId, 'message:new', enrichedDel);
+    this.gateway.emitToConversation(msg.conversationId, 'message:deleted', enrichedDel);
     return enrichedDel;
   }
 
@@ -490,7 +482,7 @@ export class ChatService {
 
     const userMapReact = await this.buildUserMap([msg.senderId]);
     const enrichedReact = this.buildEnrichedMessage(msg, userMapReact, null);
-    this.gateway.emitToConversation(msg.conversationId, 'message:new', enrichedReact);
+    this.gateway.emitToConversation(msg.conversationId, 'message:reaction', enrichedReact);
     return enrichedReact;
   }
 
@@ -581,6 +573,26 @@ export class ChatService {
     body: Pick<Conversation, 'type' | 'title' | 'classOfferingId' | 'parentVisible' | 'createdById'> & { description?: string },
     memberIds: string[],
   ): Promise<EnrichedConversation> {
+    // findOrCreate: for direct conversations return the existing one if it exists
+    if (body.type === 'direct' && memberIds.length === 1) {
+      const otherId = memberIds[0];
+      const creatorMems = await this.memRepo.find({ where: { userId: body.createdById } });
+      const creatorConvIds = creatorMems.map((m) => m.conversationId);
+      if (creatorConvIds.length) {
+        const sharedMems = await this.memRepo.find({
+          where: { userId: otherId, conversationId: In(creatorConvIds) },
+        });
+        for (const shared of sharedMems) {
+          const existing = await this.convRepo.findOne({
+            where: { id: shared.conversationId, type: 'direct' },
+          });
+          if (!existing) continue;
+          const count = await this.memRepo.count({ where: { conversationId: existing.id } });
+          if (count === 2) return this.buildConversationPayload(existing, body.createdById);
+        }
+      }
+    }
+
     const conv = await this.convRepo.save(
       this.convRepo.create({
         ...body,
@@ -617,7 +629,89 @@ export class ChatService {
       order: { lastMessageAt: 'DESC', updatedAt: 'DESC' },
     });
 
-    return Promise.all(convs.map((c) => this.buildConversationPayload(c, userId)));
+    // ── Batch all sub-queries (1 member fetch + 1 user map + 1 read-record fetch) ──
+    const allMembers = await this.memRepo.find({ where: { conversationId: In(all) } });
+    const allUserIds = [...new Set(allMembers.map((m) => m.userId))];
+    const sharedUserMap = await this.buildUserMap(allUserIds);
+    const readRecords = await this.readRepo.find({ where: { userId, conversationId: In(all) } });
+    const readMap = new Map(readRecords.map((r) => [r.conversationId, r]));
+    const membersByConv = new Map<string, ConversationMember[]>();
+    for (const m of allMembers) {
+      const list = membersByConv.get(m.conversationId) ?? [];
+      list.push(m);
+      membersByConv.set(m.conversationId, list);
+    }
+
+    return Promise.all(
+      convs.map((c) => this.buildConversationPayloadBatched(c, userId, membersByConv.get(c.id) ?? [], sharedUserMap, readMap.get(c.id))),
+    );
+  }
+
+  private async buildConversationPayloadBatched(
+    conv: Conversation,
+    userId: string,
+    members: ConversationMember[],
+    userMap: Map<string, User>,
+    readRecord: ConversationRead | undefined,
+  ): Promise<EnrichedConversation> {
+    const memberCount = members.length;
+
+    const first5 = members.slice(0, 5).map((m) => ({
+      userId: m.userId,
+      role: m.role,
+      user: userMap.has(m.userId)
+        ? this.toPublicUser(userMap.get(m.userId)!)
+        : { id: m.userId, firstName: 'Unknown', lastName: '', role: 'member', profileImageFileId: null },
+    }));
+
+    const participants: PublicUser[] = conv.type === 'direct'
+      ? members.map((m) => userMap.has(m.userId)
+          ? this.toPublicUser(userMap.get(m.userId)!)
+          : { id: m.userId, firstName: 'Unknown', lastName: '', role: 'member', profileImageFileId: null })
+      : [];
+
+    let unreadCount = 0;
+    if (readRecord?.lastReadAt) {
+      const qb = this.msgRepo.createQueryBuilder('m')
+        .where('m.conversation_id = :cid', { cid: conv.id })
+        .andWhere('m.created_at > :since', { since: readRecord.lastReadAt })
+        .andWhere('m.sender_id != :uid', { uid: userId })
+        .andWhere('m.deleted_at IS NULL');
+      unreadCount = await qb.getCount();
+    } else {
+      const qb = this.msgRepo.createQueryBuilder('m')
+        .where('m.conversation_id = :cid', { cid: conv.id })
+        .andWhere('m.sender_id != :uid', { uid: userId })
+        .andWhere('m.deleted_at IS NULL');
+      unreadCount = await qb.getCount();
+    }
+
+    let lastMessageSenderName: string | null = null;
+    if (conv.lastMessageSenderId && userMap.has(conv.lastMessageSenderId)) {
+      const s = userMap.get(conv.lastMessageSenderId)!;
+      lastMessageSenderName = `${s.firstName} ${s.lastName}`;
+    }
+
+    return {
+      id: conv.id,
+      type: conv.type,
+      title: conv.title,
+      description: conv.description ?? null,
+      avatarFileId: conv.avatarFileId ?? null,
+      lastMessageText: conv.lastMessageText ?? null,
+      lastMessageAt: conv.lastMessageAt ? conv.lastMessageAt.toISOString() : null,
+      lastMessageSenderId: conv.lastMessageSenderId ?? null,
+      lastMessageSenderName,
+      unreadCount,
+      memberCount,
+      members: first5,
+      participants,
+      createdById: conv.createdById,
+      classOfferingId: conv.classOfferingId ?? null,
+      parentVisible: conv.parentVisible,
+      createdAt: conv.createdAt.toISOString(),
+      updatedAt: conv.updatedAt.toISOString(),
+    };
   }
 
   async getConversation(id: string, user: User): Promise<EnrichedConversation> {
