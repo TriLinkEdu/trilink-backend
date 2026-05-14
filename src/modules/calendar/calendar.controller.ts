@@ -18,6 +18,7 @@ class CreateEventDto {
   @ApiProperty({ example: 'class' }) @IsString() type: string;
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() classOfferingId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() termId?: string;
 }
 
 @ApiTags('Calendar')
@@ -38,8 +39,9 @@ export class CalendarController {
     @Query('to') to?: string,
     @Query('academicYearId') academicYearId?: string,
     @Query('classOfferingId') classOfferingId?: string,
+    @Query('termId') termId?: string,
   ) {
-    return this.svc.listForViewer(user, { from, to, yearId: academicYearId, classOfferingId });
+    return this.svc.listForViewer(user, { from, to, yearId: academicYearId, classOfferingId, termId });
   }
 
   @Get(':id')

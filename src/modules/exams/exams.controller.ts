@@ -13,7 +13,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsArray, IsNumber, IsOptional, IsString, IsUUID, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -40,6 +40,7 @@ class ExamDto {
   @IsOptional()
   @IsNumber()
   maxPoints?: number;
+  @ApiProperty({ required: false }) @IsOptional() @IsUUID() termId?: string;
 }
 
 class PatchExamDto {
@@ -72,16 +73,18 @@ export class ExamsController {
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @ApiOperation({ summary: 'Create exam draft' })
   create(@Body() dto: ExamDto, @CurrentUser() user: User) {
+    const { termId, ...rest } = dto;
     return this.exams.createExam({
-      title: dto.title,
-      academicYearId: dto.academicYearId,
-      classOfferingId: dto.classOfferingId ?? null,
-      opensAt: new Date(dto.opensAt),
-      closesAt: new Date(dto.closesAt),
-      durationMinutes: dto.durationMinutes,
-      minStayMinutes: dto.minStayMinutes,
+      title: rest.title,
+      academicYearId: rest.academicYearId,
+      classOfferingId: rest.classOfferingId ?? null,
+      opensAt: new Date(rest.opensAt),
+      closesAt: new Date(rest.closesAt),
+      durationMinutes: rest.durationMinutes,
+      minStayMinutes: rest.minStayMinutes,
       createdById: user.id,
-      maxPoints: dto.maxPoints,
+      maxPoints: rest.maxPoints,
+      termId: termId ?? null,
     });
   }
 
@@ -92,36 +95,18 @@ export class ExamsController {
     description:
       'Admin: all exams (optional year). Teacher: only exams they created. Student: only published exams.',
   })
-  list(@Query('academicYearId') academicYearId: string | undefined, @CurrentUser() user: User) {
-    return this.exams.listExams(academicYearId, user);
+  list(@CurrentUser() user: User, @Query('academicYearId') academicYearId: string | undefined, @Query('termId') termId?: string) {
+    return this.exams.listExams(academicYearId, user, termId);
   }
 
   @Get(':id/attempts')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @ApiOperation({
     summary: 'List all student attempts for this exam (grading queue)',
-    description: 'Paginated. Includes submission status, scores, and needsManualGrading. Staff only.',
+    description: 'Includes submission status, scores, and needsManualGrading. Staff only.',
   })
-  listAttempts(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: User,
-    @Query('skip') skip?: string,
-    @Query('take') take?: string,
-  ) {
-    return this.exams.listAttemptsForExam(id, user, skip ? parseInt(skip, 10) : 0, take ? parseInt(take, 10) : 20);
-  }
-
-  @Get(':id/summary')
-  @Roles(UserRole.ADMIN, UserRole.TEACHER)
-  @ApiOperation({
-    summary: 'Exam summary: questions asked + compact student results table',
-    description:
-      'Returns the list of questions that were on the exam (with answer keys for staff) ' +
-      'and a compact per-student result row (score, submitted, released, etc.). ' +
-      'Use GET /exams/:id/attempts for the full paginated grading queue.',
-  })
-  examSummary(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
-    return this.exams.getExamSummary(id, user);
+  listAttempts(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.exams.listAttemptsForExam(id, user);
   }
 
   @Get(':id/results/export')

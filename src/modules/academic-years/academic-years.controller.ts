@@ -138,7 +138,7 @@ export class AcademicYearsController {
 
   @Get(':yearId/terms')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
   @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'List terms for a year' })
   async terms(@Param('yearId', ParseUUIDPipe) yearId: string) {

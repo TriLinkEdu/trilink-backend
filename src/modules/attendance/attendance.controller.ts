@@ -85,9 +85,10 @@ export class AttendanceController {
     description: 'Returns all attendance sessions for the given classOfferingId, ordered by date descending.',
   })
   @ApiQuery({ name: 'classOfferingId', required: true, description: 'Class offering UUID' })
+  @ApiQuery({ name: 'termId', required: false, description: 'Optional term UUID to filter sessions' })
   @ApiResponse({ status: 200, description: 'List of sessions' })
-  listSessions(@Query('classOfferingId') classOfferingId: string) {
-    return this.svc.listSessions(classOfferingId);
+  listSessions(@Query('classOfferingId') classOfferingId: string, @Query('termId') termId?: string) {
+    return this.svc.listSessions(classOfferingId, termId);
   }
 
   @Get('attendance-sessions/my')

@@ -33,6 +33,7 @@ class CreateAssignmentDto {
   @ApiProperty({ example: '2026-05-15T23:59:00.000Z', description: 'ISO deadline' })
   @IsDateString() deadline: string;
   @ApiPropertyOptional({ default: 100 }) @IsOptional() @IsNumber() @Min(1) maxScore?: number;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() termId?: string;
 }
 
 class UpdateAssignmentDto {
@@ -42,6 +43,7 @@ class UpdateAssignmentDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() attachmentFileId?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() deadline?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(1) maxScore?: number;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() termId?: string;
 }
 
 class SubmitAssignmentDto {
@@ -116,6 +118,7 @@ export class AssignmentsController {
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @ApiOperation({ summary: 'List my assignments (teacher)', description: 'Returns all assignments created by the authenticated teacher, optionally filtered by class.' })
   @ApiQuery({ name: 'classOfferingId', required: false, description: 'Filter by class offering UUID' })
+  @ApiQuery({ name: 'termId', required: false, description: 'Filter by term UUID' })
   @ApiResponse({
     status: 200,
     schema: {
@@ -127,8 +130,8 @@ export class AssignmentsController {
       }],
     },
   })
-  listMine(@CurrentUser() user: User, @Query('classOfferingId') classOfferingId?: string) {
-    return this.svc.listForTeacher(user.id, classOfferingId);
+  listMine(@CurrentUser() user: User, @Query('classOfferingId') classOfferingId?: string, @Query('termId') termId?: string) {
+    return this.svc.listForTeacher(user.id, classOfferingId, termId);
   }
 
   @Get(':id/submissions')
@@ -186,6 +189,7 @@ export class AssignmentsController {
     description: 'Returns all published assignments for the student\'s enrolled classes, with their submission status. Students see their own; parents see their linked child\'s.',
   })
   @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  @ApiQuery({ name: 'termId', required: false, description: 'Filter by term UUID' })
   @ApiResponse({
     status: 200,
     schema: {
@@ -197,8 +201,8 @@ export class AssignmentsController {
       }],
     },
   })
-  listForStudent(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
-    return this.svc.listForStudent(studentId, user);
+  listForStudent(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User, @Query('termId') termId?: string) {
+    return this.svc.listForStudent(studentId, user, termId);
   }
 
   @Get(':id')

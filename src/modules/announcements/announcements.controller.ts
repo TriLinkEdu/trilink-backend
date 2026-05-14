@@ -29,6 +29,7 @@ class AnnDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() classOfferingId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() targetGrade?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() targetSection?: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() termId?: string;
   @ApiPropertyOptional({ description: 'ISO 8601 — hidden from students/parents until this time' })
   @IsOptional()
   @IsDateString()
@@ -42,6 +43,7 @@ class AnnPatchDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() classOfferingId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() targetGrade?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() targetSection?: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() termId?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() publishAt?: string;
 }
 
@@ -55,22 +57,24 @@ export class AnnouncementsController {
   @Get('for-me')
   @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
   @ApiOperation({ summary: 'Announcements visible to current user' })
-  forMe(@CurrentUser() user: User) {
-    return this.svc.forUser(user);
+  forMe(@CurrentUser() user: User, @Query('termId') termId?: string) {
+    return this.svc.forUser(user, termId);
   }
 
   @Get()
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
-  list(@Query('academicYearId') academicYearId?: string) {
-    return this.svc.list(academicYearId);
+  list(@Query('academicYearId') academicYearId?: string, @Query('termId') termId?: string) {
+    return this.svc.list(academicYearId, termId);
   }
 
   @Post()
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   create(@Body() dto: AnnDto, @CurrentUser() user: User) {
-    const { publishAt, ...rest } = dto;
+    const { publishAt, termId, targetSection, ...rest } = dto;
     return this.svc.create({
       ...rest,
+      termId: termId ?? null,
+      targetSection: targetSection ?? null,
       authorId: user.id,
       publishAt: publishAt ? new Date(publishAt) : null,
     });
@@ -84,14 +88,17 @@ export class AnnouncementsController {
     @Body() dto: AnnPatchDto,
     @CurrentUser() user: User,
   ) {
+    const { termId, targetSection, ...patchBody } = dto;
     return this.svc.update(id, {
-      title: dto.title,
-      body: dto.body,
-      audience: dto.audience,
-      classOfferingId: dto.classOfferingId,
-      targetGrade: dto.targetGrade,
+      title: patchBody.title,
+      body: patchBody.body,
+      audience: patchBody.audience,
+      classOfferingId: patchBody.classOfferingId,
+      targetGrade: patchBody.targetGrade,
+      targetSection,
+      termId,
       publishAt:
-        dto.publishAt === undefined ? undefined : dto.publishAt ? new Date(dto.publishAt) : null,
+        patchBody.publishAt === undefined ? undefined : patchBody.publishAt ? new Date(patchBody.publishAt) : null,
     }, user);
   }
 

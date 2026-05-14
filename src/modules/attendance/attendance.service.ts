@@ -97,8 +97,10 @@ export class AttendanceService {
     return this.sessRepo.save(this.sessRepo.create({ ...body, termId: body.termId ?? null }));
   }
 
-  async listSessions(classOfferingId: string) {
-    return this.sessRepo.find({ where: { classOfferingId }, order: { date: 'DESC' } });
+  async listSessions(classOfferingId: string, termId?: string) {
+    const where: any = { classOfferingId };
+    if (termId) where.termId = termId;
+    return this.sessRepo.find({ where, order: { date: 'DESC' } });
   }
 
   /**

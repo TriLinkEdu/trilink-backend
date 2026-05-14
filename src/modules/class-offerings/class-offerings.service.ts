@@ -38,6 +38,12 @@ export class ClassOfferingsService {
     return this.attachStructureLabels(rows);
   }
 
+  async listByIds(ids: string[]): Promise<ClassOfferingWithLabels[]> {
+    if (!ids.length) return [];
+    const rows = await this.repo.find({ where: { id: In(ids) } });
+    return this.attachStructureLabels(rows);
+  }
+
   private async attachStructureLabels(offerings: ClassOffering[]): Promise<ClassOfferingWithLabels[]> {
     if (!offerings.length) return [];
     const gradeIds = [...new Set(offerings.map((o) => o.gradeId))];

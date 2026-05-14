@@ -87,7 +87,7 @@ export class QuestionsController {
   ) {
     const skipNum = skip ? parseInt(skip, 10) : 0;
     const takeNum = Math.min(take ? parseInt(take, 10) : 30, 100);
-    return this.exams.listQuestions(subjectId, classOfferingId, skipNum, takeNum);
+    return this.exams.listQuestions(subjectId, skipNum, takeNum);
   }
 
   @Delete(':id')

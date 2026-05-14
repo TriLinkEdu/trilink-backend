@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -167,6 +169,29 @@ export class GradesController {
   @ApiResponse({ status: 201, description: 'Grades released and notifications sent' })
   release(@Body() dto: ReleaseDto, @CurrentUser() user: User) {
     return this.svc.releaseEntries({ classOfferingId: dto.classOfferingId, title: dto.title }, user);
+  }
+
+  @Delete('group')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Delete an entire assessment (all entries with the given classOfferingId + title)',
+  })
+  @ApiBody({ type: ReleaseDto })
+  @ApiResponse({ status: 200, description: 'Assessment deleted' })
+  deleteGroup(@Body() dto: ReleaseDto, @CurrentUser() user: User) {
+    return this.svc.deleteGroup({ classOfferingId: dto.classOfferingId, title: dto.title }, user);
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Delete a single grade entry' })
+  @ApiParam({ name: 'id', description: 'Grade entry UUID' })
+  @ApiResponse({ status: 200, description: 'Entry deleted' })
+  @ApiResponse({ status: 404, description: 'Entry not found' })
+  deleteEntry(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.svc.deleteEntry(id, user);
   }
 
   // ── Teacher: view ─────────────────────────────────────────────────────────

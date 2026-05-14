@@ -217,6 +217,34 @@ export class GradesService {
     return { released: entries.length };
   }
 
+  /**
+   * Delete a single grade entry.
+   */
+  async deleteEntry(id: string, viewer: User) {
+    const entry = await this.repo.findOne({ where: { id } });
+    if (!entry) throw new NotFoundException('Grade entry not found');
+    if (viewer.role !== UserRole.ADMIN) {
+      if (entry.teacherId !== viewer.id) {
+        await this.assertTeacherOwnsClass(viewer, entry.classOfferingId);
+      }
+    }
+    await this.repo.remove(entry);
+    return { ok: true };
+  }
+
+  /**
+   * Delete an entire assessment (all entries with the given classOfferingId + title).
+   */
+  async deleteGroup(filter: { classOfferingId: string; title: string }, viewer: User) {
+    await this.assertTeacherOwnsClass(viewer, filter.classOfferingId);
+    const entries = await this.repo.find({
+      where: { classOfferingId: filter.classOfferingId, title: filter.title },
+    });
+    if (entries.length === 0) throw new NotFoundException('Assessment not found');
+    await this.repo.remove(entries);
+    return { ok: true, deleted: entries.length };
+  }
+
   // ── Queries ───────────────────────────────────────────────────────────────
 
   /**

@@ -14,19 +14,20 @@ export class CalendarService {
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
   ) {}
 
-  private baseQuery(filters: { from?: string; to?: string; yearId?: string; classOfferingId?: string }) {
+  private baseQuery(filters: { from?: string; to?: string; yearId?: string; classOfferingId?: string; termId?: string }) {
     const qb = this.repo.createQueryBuilder('e').orderBy('e.date', 'ASC');
     if (filters.yearId) qb.andWhere('e.academic_year_id = :y', { y: filters.yearId });
     if (filters.classOfferingId) qb.andWhere('e.class_offering_id = :c', { c: filters.classOfferingId });
+    if (filters.termId) qb.andWhere('(e.term_id IS NULL OR e.term_id = :tid)', { tid: filters.termId });
     if (filters.from && filters.to) qb.andWhere('e.date BETWEEN :f AND :t', { f: filters.from, t: filters.to });
     return qb;
   }
 
-  async list(filters: { from?: string; to?: string; yearId?: string; classOfferingId?: string }) {
+  async list(filters: { from?: string; to?: string; yearId?: string; classOfferingId?: string; termId?: string }) {
     return this.baseQuery(filters).getMany();
   }
 
-  async listForViewer(user: User, filters: { from?: string; to?: string; yearId?: string; classOfferingId?: string }) {
+  async listForViewer(user: User, filters: { from?: string; to?: string; yearId?: string; classOfferingId?: string; termId?: string }) {
     if (user.role === UserRole.ADMIN || user.role === UserRole.TEACHER) {
       return this.list(filters);
     }
