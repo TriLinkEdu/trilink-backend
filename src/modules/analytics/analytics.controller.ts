@@ -51,4 +51,11 @@ export class AnalyticsController {
   studentActionPlan(@CurrentUser() user: User) {
     return this.analytics.studentActionPlan(user.id);
   }
+
+  @Get('student/yearly-planner')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'Student yearly planner data with real academic terms' })
+  studentYearlyPlanner(@CurrentUser() user: User) {
+    return this.analytics.studentYearlyPlanner(user.id);
+  }
 }

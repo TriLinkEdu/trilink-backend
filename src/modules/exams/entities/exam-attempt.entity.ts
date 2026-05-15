@@ -24,6 +24,10 @@ export class ExamAttempt {
   @Column({ type: 'float', nullable: true })
   score: number | null;
 
+  /** Snapshot of the exam max points at attempt time. */
+  @Column({ name: 'max_points_snapshot', type: 'int', nullable: true })
+  maxPointsSnapshot: number | null;
+
   /** Proportional score from auto-gradable items before teacher override. */
   @Column({ name: 'auto_score', type: 'float', nullable: true })
   autoScore: number | null;

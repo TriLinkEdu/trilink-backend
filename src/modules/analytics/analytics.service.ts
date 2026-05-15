@@ -12,6 +12,10 @@ import { Enrollment } from '../enrollments/entities/enrollment.entity';
 import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
 import { StudentGoal } from '../goals/entities/student-goal.entity';
 
+import { AcademicYear } from '../academic-years/entities/academic-year.entity';
+import { Term } from '../academic-years/entities/term.entity';
+import { GamificationProfile } from '../gamification/entities/gamification-profile.entity';
+
 @Injectable()
 export class AnalyticsService {
   constructor(
@@ -24,6 +28,9 @@ export class AnalyticsService {
     @InjectRepository(Enrollment) private readonly enrRepo: Repository<Enrollment>,
     @InjectRepository(ClassOffering) private readonly coRepo: Repository<ClassOffering>,
     @InjectRepository(StudentGoal) private readonly goalRepo: Repository<StudentGoal>,
+    @InjectRepository(AcademicYear) private readonly yearRepo: Repository<AcademicYear>,
+    @InjectRepository(Term) private readonly termRepo: Repository<Term>,
+    @InjectRepository(GamificationProfile) private readonly profileRepo: Repository<GamificationProfile>,
   ) {}
 
   async adminSummary() {
@@ -309,6 +316,140 @@ export class AnalyticsService {
     }
 
     return items;
+  }
+
+  async studentYearlyPlanner(studentId: string) {
+    const activeYear = await this.yearRepo.findOne({ where: { isActive: true, isArchived: false } });
+    if (!activeYear) {
+      return {
+        academicYear: 'N/A',
+        overallScore: 0,
+        attendanceRate: 0,
+        totalXp: 0,
+        goalsCompleted: 0,
+        goalsTotal: 0,
+        terms: [],
+        currentTermIndex: 0,
+        activeGoals: [],
+      };
+    }
+
+    const terms = await this.termRepo.find({
+      where: { academicYearId: activeYear.id },
+      order: { startDate: 'ASC' },
+    });
+
+    const profile = await this.profileRepo.findOne({ where: { userId: studentId } });
+    const totalXp = profile?.totalXp ?? 0;
+
+    const allGoals = await this.goalRepo.find({ where: { studentId } });
+    const activeGoals = allGoals.filter(g => g.status !== 'completed');
+    const goalsCompleted = allGoals.length - activeGoals.length;
+
+    // Fetch grades inside the academic year
+    const attempts = await this.attRepo
+      .createQueryBuilder('a')
+      .where('a.student_id = :sid', { sid: studentId })
+      .andWhere('a.released_at >= :start', { start: activeYear.startDate })
+      .andWhere('a.released_at <= :end', { end: activeYear.endDate })
+      .andWhere('a.score IS NOT NULL')
+      .getMany();
+
+    const marks = await this.markRepo
+      .createQueryBuilder('m')
+      .innerJoinAndSelect(AttendanceSession, 's', 's.id = m.session_id')
+      .where('m.student_id = :sid', { sid: studentId })
+      .andWhere('s.date >= :start', { start: activeYear.startDate })
+      .andWhere('s.date <= :end', { end: activeYear.endDate })
+      .getRawMany<{ status: string; sessionDate: string }>();
+
+    // Overall stats
+    let totalScore = 0;
+    for (const a of attempts) {
+      if (a.maxPointsSnapshot && a.maxPointsSnapshot > 0) {
+        totalScore += (a.score! / a.maxPointsSnapshot) * 100;
+      }
+    }
+    const overallScore = attempts.length > 0 ? totalScore / attempts.length : 0;
+
+    const presentMarks = marks.filter(m => m.status === 'present' || m.status === 'late').length;
+    const attendanceRate = marks.length > 0 ? presentMarks / marks.length : 0;
+
+    // Build Term progress
+    const termProgressList = terms.map((t) => {
+      const termStart = new Date(t.startDate);
+      const termEnd = new Date(t.endDate);
+
+      // Exams in this term
+      const tAttempts = attempts.filter(a => {
+        const d = new Date(a.releasedAt!);
+        return d >= termStart && d <= termEnd;
+      });
+      let tScore = 0;
+      tAttempts.forEach(a => {
+        if (a.maxPointsSnapshot && a.maxPointsSnapshot > 0) {
+          tScore += (a.score! / a.maxPointsSnapshot) * 100;
+        }
+      });
+      const tAvgScore = tAttempts.length > 0 ? tScore / tAttempts.length : 0;
+
+      // Attendance in this term
+      const tMarks = marks.filter(m => {
+        const d = new Date(m.sessionDate);
+        return d >= termStart && d <= termEnd;
+      });
+      const tPresent = tMarks.filter(m => m.status === 'present' || m.status === 'late').length;
+      const tAttRate = tMarks.length > 0 ? tPresent / tMarks.length : 0;
+
+      // Goals in this term
+      const tGoals = allGoals.filter(g => {
+        const d = g.targetDate ? new Date(g.targetDate) : new Date(g.createdAt);
+        return d >= termStart && d <= termEnd;
+      });
+      const tGoalsHit = tGoals.filter(g => g.status === 'completed').length;
+
+      const formatDt = (dt: Date) => {
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return `${months[dt.getMonth()]}`;
+      };
+
+      return {
+        id: t.id,
+        name: t.name,
+        dateRange: `${formatDt(termStart)} - ${formatDt(termEnd)}`,
+        avgScore: tAvgScore,
+        attendanceRate: tAttRate,
+        goalsHit: tGoalsHit,
+        goalsTotal: tGoals.length,
+      };
+    });
+
+    const now = new Date();
+    let currentTermIndex = terms.findIndex(t => {
+      const termStart = new Date(t.startDate);
+      const termEnd = new Date(t.endDate);
+      return now >= termStart && now <= termEnd;
+    });
+    if (currentTermIndex === -1) currentTermIndex = 0; // Default to first if outside
+
+    return {
+      academicYear: activeYear.label,
+      overallScore,
+      attendanceRate,
+      totalXp,
+      goalsCompleted,
+      goalsTotal: allGoals.length,
+      terms: termProgressList,
+      currentTermIndex,
+      activeGoals: activeGoals.map(g => ({
+        id: g.id,
+        studentId: g.studentId,
+        goalText: g.title,
+        targetDate: g.targetDate,
+        isAchieved: g.status === 'completed',
+        createdAt: g.createdAt.toISOString(),
+      })),
+    };
   }
 
   private async activeClassOfferingIds(studentId: string): Promise<string[]> {

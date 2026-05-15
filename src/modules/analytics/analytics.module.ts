@@ -13,6 +13,10 @@ import { StudentGoal } from '../goals/entities/student-goal.entity';
 import { AnalyticsService } from './analytics.service';
 import { AnalyticsController } from './analytics.controller';
 
+import { AcademicYear } from '../academic-years/entities/academic-year.entity';
+import { Term } from '../academic-years/entities/term.entity';
+import { GamificationProfile } from '../gamification/entities/gamification-profile.entity';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -26,6 +30,9 @@ import { AnalyticsController } from './analytics.controller';
       Enrollment,
       ClassOffering,
       StudentGoal,
+      AcademicYear,
+      Term,
+      GamificationProfile,
     ]),
   ],
   controllers: [AnalyticsController],
