@@ -8,7 +8,7 @@ dotenv.config();
 
 export default new DataSource({
   type: 'postgres',
-  ...getPostgresConnectionFromEnv(),
+  ...getPostgresConnectionFromEnv({ direct: true }),
   entities: TYPEORM_ENTITIES,
   migrations: ['src/database/migrations/*.ts'],
   synchronize: false,

@@ -38,9 +38,10 @@ export function normalizePostgresUrl(url: string): string {
   }
 }
 
-export function getPostgresConnectionFromEnv(): PostgresConnectionFields {
+export function getPostgresConnectionFromEnv(opts?: { direct?: boolean }): PostgresConnectionFields {
   const useDatabaseUrl = (process.env.DB_USE_DATABASE_URL || 'true').toLowerCase() !== 'false';
-  const rawUrl = process.env.DATABASE_URL?.trim();
+  const directRawUrl = opts?.direct ? process.env.DIRECT_URL?.trim() : undefined;
+  const rawUrl = directRawUrl || process.env.DATABASE_URL?.trim();
   const databaseUrl = useDatabaseUrl && rawUrl ? normalizePostgresUrl(rawUrl) : undefined;
   if (databaseUrl) {
     return { 
