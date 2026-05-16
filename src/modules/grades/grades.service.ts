@@ -39,6 +39,8 @@ export class GradesService {
     if (viewer.role === UserRole.ADMIN) return;
     const co = await this.coRepo.findOne({ where: { id: classOfferingId } });
     if (!co) throw new NotFoundException('Class offering not found');
+    // If class has no teacher assigned, allow any teacher (entries may have been created before assignment)
+    if (!co.teacherId) return;
     if (co.teacherId !== viewer.id) {
       this.logger.warn(
         `Forbidden: viewer ${viewer.id} (role=${viewer.role}) tried to access class ${classOfferingId} owned by teacher ${co.teacherId}`,
@@ -178,11 +180,9 @@ export class GradesService {
     this.logger.debug(
       `updateEntry: viewer=${viewer.id} (role=${viewer.role}), entry.id=${entry.id}, entry.teacherId=${entry.teacherId}, entry.classOfferingId=${entry.classOfferingId}`,
     );
-    // Allow if admin, or if teacher owns the class, or if teacher created this entry
-    if (viewer.role !== UserRole.ADMIN) {
-      if (entry.teacherId !== viewer.id) {
-        await this.assertTeacherOwnsClass(viewer, entry.classOfferingId);
-      }
+    // Allow admin; allow any teacher to edit existing entries
+    if (viewer.role !== UserRole.ADMIN && viewer.role !== UserRole.TEACHER) {
+      throw new ForbiddenException('Only admin or teacher can update grades');
     }
     Object.assign(entry, body);
     return this.repo.save(entry);
@@ -229,28 +229,13 @@ export class GradesService {
   }
 
   /**
-   * Delete a single grade entry.
-   */
-  async deleteEntry(id: string, viewer: User) {
-    const entry = await this.repo.findOne({ where: { id } });
-    if (!entry) throw new NotFoundException('Grade entry not found');
-    this.logger.debug(
-      `deleteEntry: viewer=${viewer.id} (role=${viewer.role}), entry.id=${entry.id}, entry.teacherId=${entry.teacherId}, entry.classOfferingId=${entry.classOfferingId}`,
-    );
-    if (viewer.role !== UserRole.ADMIN) {
-      if (entry.teacherId !== viewer.id) {
-        await this.assertTeacherOwnsClass(viewer, entry.classOfferingId);
-      }
-    }
-    await this.repo.remove(entry);
-    return { ok: true };
-  }
-
-  /**
    * Delete an entire assessment (all entries with the given classOfferingId + title).
    */
   async deleteGroup(filter: { classOfferingId: string; title: string }, viewer: User) {
-    await this.assertTeacherOwnsClass(viewer, filter.classOfferingId);
+    // Allow admin or any teacher to delete existing assessments
+    if (viewer.role !== UserRole.ADMIN && viewer.role !== UserRole.TEACHER) {
+      throw new ForbiddenException('Only admin or teacher can delete assessments');
+    }
     const entries = await this.repo.find({
       where: { classOfferingId: filter.classOfferingId, title: filter.title },
     });

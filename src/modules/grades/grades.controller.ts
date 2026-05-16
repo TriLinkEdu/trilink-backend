@@ -183,17 +183,6 @@ export class GradesController {
     return this.svc.deleteGroup({ classOfferingId: dto.classOfferingId, title: dto.title }, user);
   }
 
-  @Delete(':id')
-  @Roles(UserRole.ADMIN, UserRole.TEACHER)
-  @HttpCode(200)
-  @ApiOperation({ summary: 'Delete a single grade entry' })
-  @ApiParam({ name: 'id', description: 'Grade entry UUID' })
-  @ApiResponse({ status: 200, description: 'Entry deleted' })
-  @ApiResponse({ status: 404, description: 'Entry not found' })
-  deleteEntry(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
-    return this.svc.deleteEntry(id, user);
-  }
-
   // ── Teacher: view ─────────────────────────────────────────────────────────
 
   @Get('class/:classOfferingId')
