@@ -112,7 +112,7 @@ export class GradesController {
         type: dto.type,
         maxScore: dto.maxScore,
         note: dto.note,
-        termId: dto.termId ?? null,
+        termId: dto.termId,
         entries: dto.entries.map((e) => ({ studentId: e.studentId, score: e.score ?? null })),
       },
       user,
@@ -137,7 +137,7 @@ export class GradesController {
         score: dto.score ?? null,
         maxScore: dto.maxScore ?? 100,
         note: dto.note ?? null,
-        termId: dto.termId ?? null,
+        termId: dto.termId,
       },
       user,
     );
