@@ -265,13 +265,15 @@ export class GradesService {
    * List all grade entries for a class, grouped by title.
    * Teacher/admin view.
    */
-  async listForClass(classOfferingId: string, viewer: User) {
+  async listForClass(classOfferingId: string, viewer: User, termId?: string) {
     this.logger.debug(
-      `listForClass: viewer=${viewer.id} (role=${viewer.role}), classOfferingId=${classOfferingId}`,
+      `listForClass: viewer=${viewer.id} (role=${viewer.role}), classOfferingId=${classOfferingId}, termId=${termId ?? 'none'}`,
     );
     await this.assertTeacherOwnsClass(viewer, classOfferingId);
+    const where: Record<string, unknown> = { classOfferingId };
+    if (termId) where.termId = termId;
     const entries = await this.repo.find({
-      where: { classOfferingId },
+      where,
       order: { createdAt: 'DESC' },
     });
 

@@ -205,6 +205,7 @@ export class GradesController {
       'Platform exam submissions appear here automatically with type = exam.',
   })
   @ApiParam({ name: 'classOfferingId', description: 'Class offering UUID' })
+  @ApiQuery({ name: 'termId', required: false, description: 'Filter by term UUID' })
   @ApiResponse({
     status: 200,
     schema: {
@@ -225,8 +226,12 @@ export class GradesController {
       },
     },
   })
-  listForClass(@Param('classOfferingId', ParseUUIDPipe) classOfferingId: string, @CurrentUser() user: User) {
-    return this.svc.listForClass(classOfferingId, user);
+  listForClass(
+    @Param('classOfferingId', ParseUUIDPipe) classOfferingId: string,
+    @Query('termId') termId: string | undefined,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.listForClass(classOfferingId, user, termId);
   }
 
   // ── Student / parent: view ────────────────────────────────────────────────
