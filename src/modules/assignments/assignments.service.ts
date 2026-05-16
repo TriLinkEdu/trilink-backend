@@ -92,7 +92,7 @@ export class AssignmentsService {
     attachmentFileId?: string;
     deadline: string;
     maxScore?: number;
-    termId?: string;
+    termId: string;
   }, teacher: User) {
     const co = await this.coRepo.findOne({ where: { id: body.classOfferingId } });
     if (!co) throw new NotFoundException('Class offering not found');
@@ -108,7 +108,7 @@ export class AssignmentsService {
       attachmentFileId: body.attachmentFileId ?? null,
       deadline: new Date(body.deadline),
       maxScore: body.maxScore ?? 100,
-      termId: body.termId ?? null,
+      termId: body.termId,
       published: false,
     }));
     return this.enrichAssignment(assignment);
@@ -121,7 +121,7 @@ export class AssignmentsService {
     attachmentFileId: string | null;
     deadline: string;
     maxScore: number;
-    termId: string | null;
+    termId: string;
   }>, viewer: User) {
     const a = await this.repo.findOne({ where: { id } });
     if (!a) throw new NotFoundException('Assignment not found');
@@ -337,6 +337,7 @@ export class AssignmentsService {
       submissionId: sub.id,
       score: sub.score,
       maxScore: a.maxScore,
+      termId: a.termId,
     }).catch(() => {});
 
     return saved;

@@ -11,12 +11,21 @@ import * as bcrypt from 'bcrypt';
 import { User, UserRole } from './entities/user.entity';
 import { RegisterByAdminDto } from './dto/register-by-admin.dto';
 import { ParentStudentsService } from '../parent-students/parent-students.service';
+import { Enrollment } from '../enrollments/entities/enrollment.entity';
+import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
+import { AcademicYear } from '../academic-years/entities/academic-year.entity';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    @InjectRepository(Enrollment)
+    private readonly enrollmentRepo: Repository<Enrollment>,
+    @InjectRepository(ClassOffering)
+    private readonly classRepo: Repository<ClassOffering>,
+    @InjectRepository(AcademicYear)
+    private readonly yearRepo: Repository<AcademicYear>,
     private readonly parentStudents: ParentStudentsService,
   ) {}
 
@@ -81,6 +90,41 @@ export class UsersService {
     }
 
     const saved = await this.userRepo.save(user);
+
+    // Auto-enroll student in class offerings for their grade/section
+    if (role === UserRole.STUDENT && saved.grade && saved.section) {
+      const activeYear = await this.yearRepo.findOne({
+        where: { isActive: true },
+        order: { startDate: 'DESC' },
+      });
+      const yearId = activeYear?.id ?? null;
+      if (yearId) {
+        const offerings = await this.classRepo
+          .createQueryBuilder('co')
+          .innerJoin('grades', 'g', 'co.grade_id = g.id')
+          .innerJoin('sections', 's', 'co.section_id = s.id')
+          .where('g.name = :grade', { grade: saved.grade })
+          .andWhere('s.name = :section', { section: saved.section })
+          .andWhere('co.academic_year_id = :yearId', { yearId })
+          .getMany();
+
+        for (const co of offerings) {
+          const exists = await this.enrollmentRepo.findOne({
+            where: { studentId: saved.id, classOfferingId: co.id },
+          });
+          if (!exists) {
+            await this.enrollmentRepo.save(
+              this.enrollmentRepo.create({
+                studentId: saved.id,
+                classOfferingId: co.id,
+                academicYearId: yearId,
+                status: 'active',
+              }),
+            );
+          }
+        }
+      }
+    }
 
     if (role === UserRole.PARENT && dto.linkedStudentId) {
       await this.parentStudents.create({

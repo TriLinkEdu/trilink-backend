@@ -37,9 +37,9 @@ export class Exam {
   @Column({ name: 'created_by_id', type: 'uuid' })
   createdById: string;
 
-  /** Optional term this exam belongs to */
-  @Column({ name: 'term_id', type: 'uuid', nullable: true })
-  termId: string | null;
+  /** Term this exam belongs to */
+  @Column({ name: 'term_id', type: 'uuid' })
+  termId: string;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

@@ -52,7 +52,7 @@ class BulkGradeDto {
   @ApiProperty({ enum: GradeEntryType, enumName: 'GradeEntryType' }) @IsEnum(GradeEntryType) type: GradeEntryType;
   @ApiProperty({ description: 'Maximum possible score', example: 100 }) @IsNumber() @Min(1) maxScore: number;
   @ApiPropertyOptional({ description: 'Optional note for all entries' }) @IsOptional() @IsString() note?: string;
-  @ApiPropertyOptional({ description: 'Optional term UUID to tag these entries' }) @IsOptional() @IsUUID() termId?: string;
+  @ApiProperty({ description: 'Term UUID to tag these entries' }) @IsUUID() termId: string;
   @ApiProperty({ type: [StudentScoreRow], description: 'One row per student' })
   @IsArray()
   @ValidateNested({ each: true })
@@ -68,7 +68,7 @@ class CreateEntryDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() score?: number | null;
   @ApiPropertyOptional({ default: 100 }) @IsOptional() @IsNumber() @Min(1) maxScore?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string | null;
-  @ApiPropertyOptional({ description: 'Optional term UUID to tag this entry' }) @IsOptional() @IsUUID() termId?: string;
+  @ApiProperty({ description: 'Term UUID to tag this entry' }) @IsUUID() termId: string;
 }
 
 class PatchEntryDto {

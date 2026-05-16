@@ -49,9 +49,9 @@ export class GradeEntry {
   @Column({ name: 'exam_attempt_id', type: 'uuid', nullable: true })
   examAttemptId: string | null;
 
-  /** Optional term this grade entry belongs to */
-  @Column({ name: 'term_id', type: 'uuid', nullable: true })
-  termId: string | null;
+  /** Term this grade entry belongs to */
+  @Column({ name: 'term_id', type: 'uuid' })
+  termId: string;
 
   /** Whether the result has been released/visible to the student */
   @Column({ name: 'released_at', type: 'timestamp', nullable: true })
