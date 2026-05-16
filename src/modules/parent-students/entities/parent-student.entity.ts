@@ -18,7 +18,7 @@ export class ParentStudent {
   @Column({ name: 'student_id', type: 'uuid' })
   studentId: string;
 
-  @Column({ type: 'varchar', length: 40 })
+  @Column({ name: 'relation', type: 'varchar', length: 40 })
   relationship: string;
 
   @Column({ name: 'is_primary', type: 'boolean', default: false })

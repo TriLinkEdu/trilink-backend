@@ -5,9 +5,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TYPEORM_ENTITIES } from './typeorm-entities';
 import { getPostgresConnectionFromEnv } from './postgres-env';
+import { User } from '../modules/users/entities/user.entity';
+import { SeedService } from './seed.service';
 
 @Module({
   imports: [
+    TypeOrmModule.forFeature([User]),
     TypeOrmModule.forRootAsync({
       useFactory: (config: ConfigService) => {
         const dbType = config.get<string>('database.type') || 'postgres';
@@ -39,6 +42,7 @@ import { getPostgresConnectionFromEnv } from './postgres-env';
       inject: [ConfigService],
     }),
   ],
+  providers: [SeedService],
   exports: [TypeOrmModule],
 })
 export class DatabaseModule {}
