@@ -9,6 +9,7 @@ import {
 
 @Entity('homeroom_assignments')
 @Index(['academicYearId', 'gradeId', 'sectionId'], { unique: true })
+@Index(['teacherId', 'academicYearId'], { unique: true })
 export class HomeroomAssignment {
   @PrimaryGeneratedColumn('uuid')
   id: string;

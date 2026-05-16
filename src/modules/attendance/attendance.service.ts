@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { AttendanceSession } from './entities/attendance-session.entity';
 import { AttendanceMark } from './entities/attendance-mark.entity';
 import { Enrollment } from '../enrollments/entities/enrollment.entity';
@@ -145,10 +145,10 @@ export class AttendanceService {
     await this.assertTeacherOwnsClass(viewer, session.classOfferingId);
     const enrolled = await this.enrRepo.find({ where: { classOfferingId: session.classOfferingId, status: 'active' } });
     const ids = new Set(enrolled.map((e) => e.studentId));
-    const validStatuses = new Set(['present', 'absent', 'excused']);
+    const validStatuses = new Set(['present', 'absent', 'excused', 'late']);
     for (const m of marks) {
       if (!ids.has(m.studentId)) throw new BadRequestException(`Student ${m.studentId} not in class`);
-      if (!validStatuses.has(m.status)) throw new BadRequestException(`Invalid status "${m.status}". Allowed: present, absent, excused`);
+      if (!validStatuses.has(m.status)) throw new BadRequestException(`Invalid status "${m.status}". Allowed: present, absent, excused, late`);
       const existing = await this.markRepo.findOne({ where: { sessionId, studentId: m.studentId } });
       if (existing) {
         const before = { status: existing.status, note: existing.note ?? null };
@@ -210,11 +210,11 @@ export class AttendanceService {
 
     await this.assertTeacherOwnsClass(viewer, session.classOfferingId);
 
-    const validStatuses = new Set(['present', 'absent', 'excused']);
+    const validStatuses = new Set(['present', 'absent', 'excused', 'late']);
     const before = { status: mark.status, note: mark.note ?? null };
     if (body.status !== undefined) {
       if (!validStatuses.has(body.status)) {
-        throw new BadRequestException(`Invalid status "${body.status}". Allowed: present, absent, excused`);
+        throw new BadRequestException(`Invalid status "${body.status}". Allowed: present, absent, excused, late`);
       }
       mark.status = body.status;
     }
@@ -423,6 +423,99 @@ export class AttendanceService {
     );
 
     return { ...classDetail, sessions: out };
+  }
+
+  /**
+   * Attendance analytics for a class offering.
+   * Returns aggregated stats, total counts, and top students by absences/lates.
+   */
+  async analyticsClass(classOfferingId: string) {
+    const co = await this.coRepo.findOne({ where: { id: classOfferingId } });
+    const classDetail = co ? await this.enrichClassOffering(co) : { classOfferingId };
+
+    const sessions = await this.sessRepo.find({ where: { classOfferingId }, order: { date: 'DESC' } });
+    const sessionIds = sessions.map((s) => s.id);
+
+    if (!sessionIds.length) {
+      return {
+        ...classDetail,
+        totalSessions: 0,
+        totalMarks: 0,
+        present: 0,
+        absent: 0,
+        late: 0,
+        excused: 0,
+        attendancePercent: 0,
+        mostAbsences: [],
+        mostLates: [],
+        studentSummaries: [],
+      };
+    }
+
+    const marks = await this.markRepo
+      .createQueryBuilder('m')
+      .where('m.session_id IN (:...ids)', { ids: sessionIds })
+      .getMany();
+
+    const present = marks.filter((m) => m.status === 'present').length;
+    const absent = marks.filter((m) => m.status === 'absent').length;
+    const late = marks.filter((m) => m.status === 'late').length;
+    const excused = marks.filter((m) => m.status === 'excused').length;
+    const totalMarks = marks.length;
+    const attendancePercent = totalMarks > 0 ? Math.round(((present + late) / totalMarks) * 1000) / 10 : 0;
+
+    // Per-student aggregation
+    const studentMap = new Map<string, { present: number; absent: number; late: number; excused: number; total: number }>();
+    for (const m of marks) {
+      const s = studentMap.get(m.studentId) ?? { present: 0, absent: 0, late: 0, excused: 0, total: 0 };
+      s.total++;
+      if (m.status === 'present') s.present++;
+      if (m.status === 'absent') s.absent++;
+      if (m.status === 'late') s.late++;
+      if (m.status === 'excused') s.excused++;
+      studentMap.set(m.studentId, s);
+    }
+
+    const studentIds = [...studentMap.keys()];
+    const students = await this.userRepo.findBy({ id: In(studentIds) });
+    const studentMapById = new Map(students.map((s) => [s.id, s]));
+
+    const studentSummaries = studentIds.map((id) => {
+      const s = studentMap.get(id)!;
+      const u = studentMapById.get(id);
+      return {
+        studentId: id,
+        firstName: u?.firstName ?? null,
+        lastName: u?.lastName ?? null,
+        email: u?.email ?? null,
+        ...s,
+        attendancePercent: s.total > 0 ? Math.round(((s.present + s.late) / s.total) * 1000) / 10 : 0,
+      };
+    });
+
+    const mostAbsences = [...studentSummaries]
+      .sort((a, b) => b.absent - a.absent)
+      .slice(0, 10)
+      .filter((s) => s.absent > 0);
+
+    const mostLates = [...studentSummaries]
+      .sort((a, b) => b.late - a.late)
+      .slice(0, 10)
+      .filter((s) => s.late > 0);
+
+    return {
+      ...classDetail,
+      totalSessions: sessions.length,
+      totalMarks,
+      present,
+      absent,
+      late,
+      excused,
+      attendancePercent,
+      mostAbsences,
+      mostLates,
+      studentSummaries: studentSummaries.sort((a, b) => (a.lastName ?? '').localeCompare(b.lastName ?? '')),
+    };
   }
 
   /**
