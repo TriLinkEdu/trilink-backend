@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { ClassOffering } from '../entities/class-offering.entity';
 import { User, UserRole } from '../../users/entities/user.entity';
 import { Grade } from '../../school-structure/entities/grade.entity';
@@ -96,8 +96,8 @@ export class BulkClassOfferingService {
 
       // Fetch all sections and subjects in batch
       const [sections, subjects] = await Promise.all([
-        sectionRepo.findByIds(sectionIds),
-        subjectRepo.findByIds(subjectIds),
+        sectionRepo.findBy({ id: In(sectionIds) }),
+        subjectRepo.findBy({ id: In(subjectIds) }),
       ]);
 
       // Create maps for quick lookup
