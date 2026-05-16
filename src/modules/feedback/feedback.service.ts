@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Feedback, FeedbackType, FeedbackSenderRole } from './entities/feedback.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
@@ -53,7 +53,7 @@ export class FeedbackService {
       const links = await this.psRepo.find({ where: { parentId: author.id } });
       if (links.length) {
         const studentIds = links.map(l => l.studentId);
-        const students = await this.userRepo.findByIds(studentIds);
+        const students = await this.userRepo.findBy({ id: In(studentIds) });
         children = students.map(s => ({ studentId: s.id, firstName: s.firstName, lastName: s.lastName }));
       }
     }

@@ -22,7 +22,7 @@ import { AttendanceService } from './attendance.service';
 
 class MarkRow {
   @ApiProperty({ description: 'Student UUID' }) @IsUUID() studentId: string;
-  @ApiProperty({ example: 'present', description: 'present | absent | excused' }) @IsString() status: string;
+  @ApiProperty({ example: 'present', description: 'present | absent | excused | late' }) @IsString() status: string;
   @ApiPropertyOptional({ description: 'Optional note for this mark' }) @IsOptional() @IsString() note?: string;
 }
 
@@ -35,7 +35,7 @@ class BulkMarksDto {
 }
 
 class EditMarkDto {
-  @ApiPropertyOptional({ example: 'present', description: 'present | absent | excused' })
+  @ApiPropertyOptional({ example: 'present', description: 'present | absent | excused | late' })
   @IsOptional()
   @IsString()
   status?: string;
@@ -278,6 +278,21 @@ export class AttendanceController {
     @CurrentUser() user: User,
   ) {
     return this.svc.reportStudentBySubject(studentId, subjectId, user);
+  }
+
+  @Get('reports/attendance/class/:classOfferingId/analytics')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({
+    summary: 'Attendance analytics for a class offering',
+    description:
+      'Returns aggregated attendance stats for the class: total sessions, marks by status, ' +
+      'attendance percentage, top students with most absences, top students with most lates, ' +
+      'and per-student summaries.',
+  })
+  @ApiParam({ name: 'classOfferingId', description: 'Class offering UUID' })
+  @ApiResponse({ status: 200, description: 'Class attendance analytics' })
+  analyticsClass(@Param('classOfferingId', ParseUUIDPipe) classOfferingId: string) {
+    return this.svc.analyticsClass(classOfferingId);
   }
 
   @Get('reports/attendance/class/:classOfferingId')
