@@ -245,7 +245,7 @@ export class CompleteMvpProductionSchema20260506130000 implements MigrationInter
       CREATE TABLE IF NOT EXISTS achievements (
         id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
         key varchar(64) NOT NULL UNIQUE,
-        name varchar(120) NOT NULL,
+        title varchar(120) NOT NULL,
         description text,
         icon_url varchar(255),
         category varchar(20) NOT NULL,
