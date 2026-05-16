@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -18,6 +19,8 @@ import { Subject } from '../school-structure/entities/subject.entity';
 
 @Injectable()
 export class GradesService {
+  private readonly logger = new Logger(GradesService.name);
+
   constructor(
     @InjectRepository(GradeEntry) private readonly repo: Repository<GradeEntry>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
@@ -36,7 +39,12 @@ export class GradesService {
     if (viewer.role === UserRole.ADMIN) return;
     const co = await this.coRepo.findOne({ where: { id: classOfferingId } });
     if (!co) throw new NotFoundException('Class offering not found');
-    if (co.teacherId !== viewer.id) throw new ForbiddenException('You do not teach this class');
+    if (co.teacherId !== viewer.id) {
+      this.logger.warn(
+        `Forbidden: viewer ${viewer.id} (role=${viewer.role}) tried to access class ${classOfferingId} owned by teacher ${co.teacherId}`,
+      );
+      throw new ForbiddenException('You do not teach this class');
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -167,6 +175,9 @@ export class GradesService {
   ) {
     const entry = await this.repo.findOne({ where: { id } });
     if (!entry) throw new NotFoundException('Grade entry not found');
+    this.logger.debug(
+      `updateEntry: viewer=${viewer.id} (role=${viewer.role}), entry.id=${entry.id}, entry.teacherId=${entry.teacherId}, entry.classOfferingId=${entry.classOfferingId}`,
+    );
     // Allow if admin, or if teacher owns the class, or if teacher created this entry
     if (viewer.role !== UserRole.ADMIN) {
       if (entry.teacherId !== viewer.id) {
@@ -223,6 +234,9 @@ export class GradesService {
   async deleteEntry(id: string, viewer: User) {
     const entry = await this.repo.findOne({ where: { id } });
     if (!entry) throw new NotFoundException('Grade entry not found');
+    this.logger.debug(
+      `deleteEntry: viewer=${viewer.id} (role=${viewer.role}), entry.id=${entry.id}, entry.teacherId=${entry.teacherId}, entry.classOfferingId=${entry.classOfferingId}`,
+    );
     if (viewer.role !== UserRole.ADMIN) {
       if (entry.teacherId !== viewer.id) {
         await this.assertTeacherOwnsClass(viewer, entry.classOfferingId);
@@ -251,10 +265,15 @@ export class GradesService {
    * List all grade entries for a class, grouped by title.
    * Teacher/admin view.
    */
-  async listForClass(classOfferingId: string, viewer: User) {
+  async listForClass(classOfferingId: string, viewer: User, termId?: string) {
+    this.logger.debug(
+      `listForClass: viewer=${viewer.id} (role=${viewer.role}), classOfferingId=${classOfferingId}, termId=${termId ?? 'none'}`,
+    );
     await this.assertTeacherOwnsClass(viewer, classOfferingId);
+    const where: Record<string, unknown> = { classOfferingId };
+    if (termId) where.termId = termId;
     const entries = await this.repo.find({
-      where: { classOfferingId },
+      where,
       order: { createdAt: 'DESC' },
     });
 

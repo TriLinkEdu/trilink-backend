@@ -112,7 +112,7 @@ export class GradesController {
         type: dto.type,
         maxScore: dto.maxScore,
         note: dto.note,
-        termId: dto.termId ?? null,
+        termId: dto.termId,
         entries: dto.entries.map((e) => ({ studentId: e.studentId, score: e.score ?? null })),
       },
       user,
@@ -137,7 +137,7 @@ export class GradesController {
         score: dto.score ?? null,
         maxScore: dto.maxScore ?? 100,
         note: dto.note ?? null,
-        termId: dto.termId ?? null,
+        termId: dto.termId,
       },
       user,
     );
@@ -205,6 +205,7 @@ export class GradesController {
       'Platform exam submissions appear here automatically with type = exam.',
   })
   @ApiParam({ name: 'classOfferingId', description: 'Class offering UUID' })
+  @ApiQuery({ name: 'termId', required: false, description: 'Filter by term UUID' })
   @ApiResponse({
     status: 200,
     schema: {
@@ -225,8 +226,12 @@ export class GradesController {
       },
     },
   })
-  listForClass(@Param('classOfferingId', ParseUUIDPipe) classOfferingId: string, @CurrentUser() user: User) {
-    return this.svc.listForClass(classOfferingId, user);
+  listForClass(
+    @Param('classOfferingId', ParseUUIDPipe) classOfferingId: string,
+    @Query('termId') termId: string | undefined,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.listForClass(classOfferingId, user, termId);
   }
 
   // ── Student / parent: view ────────────────────────────────────────────────
