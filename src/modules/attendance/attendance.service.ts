@@ -18,6 +18,7 @@ import { Section } from '../school-structure/entities/section.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { GamificationService } from '../gamification/gamification.service';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class AttendanceService {
@@ -33,6 +34,7 @@ export class AttendanceService {
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     private readonly notifications: NotificationsService,
     private readonly gamification: GamificationService,
+    private readonly audit: AuditService,
   ) {}
 
   // ─── Access guards ────────────────────────────────────────────────────────
@@ -88,15 +90,17 @@ export class AttendanceService {
 
   // ─── Session management ───────────────────────────────────────────────────
 
-  async createSession(body: { classOfferingId: string; date: string; takenById: string }, viewer: User) {
+  async createSession(body: { classOfferingId: string; date: string; takenById: string; termId?: string | null }, viewer: User) {
     await this.assertTeacherOwnsClass(viewer, body.classOfferingId);
     const dup = await this.sessRepo.findOne({ where: { classOfferingId: body.classOfferingId, date: body.date } });
     if (dup) throw new ConflictException('Session already exists for this date');
-    return this.sessRepo.save(this.sessRepo.create(body));
+    return this.sessRepo.save(this.sessRepo.create({ ...body, termId: body.termId ?? null }));
   }
 
-  async listSessions(classOfferingId: string) {
-    return this.sessRepo.find({ where: { classOfferingId }, order: { date: 'DESC' } });
+  async listSessions(classOfferingId: string, termId?: string) {
+    const where: any = { classOfferingId };
+    if (termId) where.termId = termId;
+    return this.sessRepo.find({ where, order: { date: 'DESC' } });
   }
 
   /**
@@ -147,11 +151,26 @@ export class AttendanceService {
       if (!validStatuses.has(m.status)) throw new BadRequestException(`Invalid status "${m.status}". Allowed: present, absent, excused`);
       const existing = await this.markRepo.findOne({ where: { sessionId, studentId: m.studentId } });
       if (existing) {
+        const before = { status: existing.status, note: existing.note ?? null };
         existing.status = m.status;
         existing.note = m.note ?? null;
-        await this.markRepo.save(existing);
+        const saved = await this.markRepo.save(existing);
+        await this.audit.log(
+          viewer.id,
+          viewer.role === UserRole.ADMIN ? 'attendance.mark_admin_override' : 'attendance.mark_update',
+          'attendance_mark',
+          saved.id,
+          JSON.stringify({ sessionId, studentId: m.studentId, before, after: { status: saved.status, note: saved.note ?? null } }),
+        );
       } else {
-        await this.markRepo.save(this.markRepo.create({ sessionId, studentId: m.studentId, status: m.status, note: m.note ?? null }));
+        const saved = await this.markRepo.save(this.markRepo.create({ sessionId, studentId: m.studentId, status: m.status, note: m.note ?? null }));
+        await this.audit.log(
+          viewer.id,
+          'attendance.mark_create',
+          'attendance_mark',
+          saved.id,
+          JSON.stringify({ sessionId, studentId: m.studentId, status: saved.status, note: saved.note ?? null }),
+        );
       }
     }
 
@@ -192,6 +211,7 @@ export class AttendanceService {
     await this.assertTeacherOwnsClass(viewer, session.classOfferingId);
 
     const validStatuses = new Set(['present', 'absent', 'excused']);
+    const before = { status: mark.status, note: mark.note ?? null };
     if (body.status !== undefined) {
       if (!validStatuses.has(body.status)) {
         throw new BadRequestException(`Invalid status "${body.status}". Allowed: present, absent, excused`);
@@ -200,7 +220,15 @@ export class AttendanceService {
     }
     if (body.note !== undefined) mark.note = body.note ?? null;
 
-    return this.markRepo.save(mark);
+    const saved = await this.markRepo.save(mark);
+    await this.audit.log(
+      viewer.id,
+      viewer.role === UserRole.ADMIN ? 'attendance.mark_admin_override' : 'attendance.mark_update',
+      'attendance_mark',
+      saved.id,
+      JSON.stringify({ sessionId: session.id, studentId: saved.studentId, before, after: { status: saved.status, note: saved.note ?? null } }),
+    );
+    return saved;
   }
 
   // ─── Reports ──────────────────────────────────────────────────────────────
@@ -395,5 +423,120 @@ export class AttendanceService {
     );
 
     return { ...classDetail, sessions: out };
+  }
+
+  /**
+   * Attendance summary for a student in a specific term.
+   * Matches sessions by termId or by date range if termId is not set on the session.
+   */
+  async reportStudentByTerm(studentId: string, termId: string, viewer: User) {
+    await this.assertStudentViewer(viewer, studentId);
+
+    // Load term to get date range
+    const { Term } = await import('../academic-years/entities/term.entity');
+    // We need to query the terms table directly
+    const termResult = await this.sessRepo.manager.query(
+      `SELECT id, academic_year_id, name, start_date, end_date FROM terms WHERE id = $1`,
+      [termId],
+    );
+    if (!termResult || !termResult.length) {
+      throw new NotFoundException('Term not found');
+    }
+    const term = termResult[0] as { id: string; academic_year_id: string; name: string; start_date: string; end_date: string };
+
+    const studentInfo = await this.resolveStudent(studentId);
+
+    // Find all enrollments for this student in this academic year
+    const enrollments = await this.enrRepo.find({
+      where: { studentId, academicYearId: term.academic_year_id },
+    });
+    const classOfferingIds = enrollments.map((e) => e.classOfferingId);
+
+    if (!classOfferingIds.length) {
+      return {
+        ...studentInfo,
+        termId,
+        termName: term.name,
+        present: 0, absent: 0, late: 0, excused: 0, total: 0, attendancePercent: 0,
+        sessions: [],
+      };
+    }
+
+    // Sessions tagged with this termId
+    const sessionsByTermId = await this.sessRepo
+      .createQueryBuilder('s')
+      .where('s.class_offering_id IN (:...ids)', { ids: classOfferingIds })
+      .andWhere('s.term_id = :termId', { termId })
+      .getMany();
+
+    // Sessions without termId but within date range
+    const sessionsByDate = await this.sessRepo
+      .createQueryBuilder('s')
+      .where('s.class_offering_id IN (:...ids)', { ids: classOfferingIds })
+      .andWhere('s.term_id IS NULL')
+      .andWhere('s.date >= :start', { start: term.start_date })
+      .andWhere('s.date <= :end', { end: term.end_date })
+      .getMany();
+
+    // Merge and deduplicate
+    const allSessions = [...sessionsByTermId, ...sessionsByDate];
+    const seenIds = new Set<string>();
+    const sessions = allSessions.filter((s) => {
+      if (seenIds.has(s.id)) return false;
+      seenIds.add(s.id);
+      return true;
+    });
+
+    if (!sessions.length) {
+      return {
+        ...studentInfo,
+        termId,
+        termName: term.name,
+        present: 0, absent: 0, late: 0, excused: 0, total: 0, attendancePercent: 0,
+        sessions: [],
+      };
+    }
+
+    const sessionIds = sessions.map((s) => s.id);
+    const marks = await this.markRepo
+      .createQueryBuilder('m')
+      .where('m.session_id IN (:...ids)', { ids: sessionIds })
+      .andWhere('m.student_id = :studentId', { studentId })
+      .getMany();
+
+    const markMap = new Map(marks.map((m) => [m.sessionId, m]));
+
+    const present = marks.filter((m) => m.status === 'present').length;
+    const absent = marks.filter((m) => m.status === 'absent').length;
+    const late = marks.filter((m) => m.status === 'late').length;
+    const excused = marks.filter((m) => m.status === 'excused').length;
+    const total = marks.length;
+    const attendancePercent = total > 0 ? Math.round(((present + late) / total) * 1000) / 10 : 0;
+
+    const sessionDetails = sessions
+      .sort((a, b) => (a.date < b.date ? 1 : -1))
+      .map((s) => {
+        const mark = markMap.get(s.id);
+        return {
+          sessionId: s.id,
+          date: s.date,
+          classOfferingId: s.classOfferingId,
+          status: mark?.status ?? null,
+          note: mark?.note ?? null,
+        };
+      });
+
+    return {
+      ...studentInfo,
+      termId,
+      termName: term.name,
+      present,
+      absent,
+      late,
+      excused,
+      total,
+      attendancePercent,
+      sessions: sessionDetails,
+    };
   }
 }

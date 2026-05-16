@@ -56,17 +56,13 @@ services:
       - .env
     environment:
       NODE_ENV: ${NODE_ENV:-development}
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_USERNAME: trilink
-      DB_PASSWORD: trilink_secret
-      DB_DATABASE: trilink
-      DB_TYPE: postgres
+      DB_USE_DATABASE_URL: "true"
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      RESOURCE_STORAGE_DRIVER: local
+      RESOURCE_STORAGE_LOCAL_DIR: /app/uploads
+      RESOURCE_STORAGE_LOCAL_PUBLIC_BASE_URL: http://localhost:4000
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
@@ -82,14 +78,9 @@ services:
       - .env
     environment:
       NODE_ENV: ${NODE_ENV:-development}
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_USERNAME: trilink
-      DB_PASSWORD: trilink_secret
-      DB_DATABASE: trilink
-      DB_TYPE: postgres
+      DB_USE_DATABASE_URL: "true"
     depends_on:
-      db:
+      redis:
         condition: service_healthy
     command: npm run seed:prod
     networks:

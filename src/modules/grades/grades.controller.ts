@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -50,6 +52,7 @@ class BulkGradeDto {
   @ApiProperty({ enum: GradeEntryType, enumName: 'GradeEntryType' }) @IsEnum(GradeEntryType) type: GradeEntryType;
   @ApiProperty({ description: 'Maximum possible score', example: 100 }) @IsNumber() @Min(1) maxScore: number;
   @ApiPropertyOptional({ description: 'Optional note for all entries' }) @IsOptional() @IsString() note?: string;
+  @ApiProperty({ description: 'Term UUID to tag these entries' }) @IsUUID() termId: string;
   @ApiProperty({ type: [StudentScoreRow], description: 'One row per student' })
   @IsArray()
   @ValidateNested({ each: true })
@@ -65,6 +68,7 @@ class CreateEntryDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() score?: number | null;
   @ApiPropertyOptional({ default: 100 }) @IsOptional() @IsNumber() @Min(1) maxScore?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string | null;
+  @ApiProperty({ description: 'Term UUID to tag this entry' }) @IsUUID() termId: string;
 }
 
 class PatchEntryDto {
@@ -108,6 +112,7 @@ export class GradesController {
         type: dto.type,
         maxScore: dto.maxScore,
         note: dto.note,
+        termId: dto.termId,
         entries: dto.entries.map((e) => ({ studentId: e.studentId, score: e.score ?? null })),
       },
       user,
@@ -132,6 +137,7 @@ export class GradesController {
         score: dto.score ?? null,
         maxScore: dto.maxScore ?? 100,
         note: dto.note ?? null,
+        termId: dto.termId,
       },
       user,
     );
@@ -165,6 +171,29 @@ export class GradesController {
     return this.svc.releaseEntries({ classOfferingId: dto.classOfferingId, title: dto.title }, user);
   }
 
+  @Delete('group')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Delete an entire assessment (all entries with the given classOfferingId + title)',
+  })
+  @ApiBody({ type: ReleaseDto })
+  @ApiResponse({ status: 200, description: 'Assessment deleted' })
+  deleteGroup(@Body() dto: ReleaseDto, @CurrentUser() user: User) {
+    return this.svc.deleteGroup({ classOfferingId: dto.classOfferingId, title: dto.title }, user);
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Delete a single grade entry' })
+  @ApiParam({ name: 'id', description: 'Grade entry UUID' })
+  @ApiResponse({ status: 200, description: 'Entry deleted' })
+  @ApiResponse({ status: 404, description: 'Entry not found' })
+  deleteEntry(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.svc.deleteEntry(id, user);
+  }
+
   // ── Teacher: view ─────────────────────────────────────────────────────────
 
   @Get('class/:classOfferingId')
@@ -176,6 +205,7 @@ export class GradesController {
       'Platform exam submissions appear here automatically with type = exam.',
   })
   @ApiParam({ name: 'classOfferingId', description: 'Class offering UUID' })
+  @ApiQuery({ name: 'termId', required: false, description: 'Filter by term UUID' })
   @ApiResponse({
     status: 200,
     schema: {
@@ -196,8 +226,12 @@ export class GradesController {
       },
     },
   })
-  listForClass(@Param('classOfferingId', ParseUUIDPipe) classOfferingId: string, @CurrentUser() user: User) {
-    return this.svc.listForClass(classOfferingId, user);
+  listForClass(
+    @Param('classOfferingId', ParseUUIDPipe) classOfferingId: string,
+    @Query('termId') termId: string | undefined,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.listForClass(classOfferingId, user, termId);
   }
 
   // ── Student / parent: view ────────────────────────────────────────────────
@@ -247,5 +281,43 @@ export class GradesController {
     @CurrentUser() user: User,
   ) {
     return this.svc.listForStudentBySubject(studentId, subjectId, user);
+  }
+
+  @Get('student/:studentId/term/:termId')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({
+    summary: 'All released grade entries for a student filtered by term, grouped by subject',
+    description:
+      'Returns all grade entries tagged with the given termId for the student, grouped by subject. ' +
+      'Students can only view their own. Parents can only view their linked child.',
+  })
+  @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  @ApiParam({ name: 'termId', description: 'Term UUID' })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      example: {
+        studentId: 'uuid',
+        studentName: 'Ali Hassan',
+        termId: 'uuid',
+        subjects: [
+          {
+            subjectId: 'uuid',
+            subjectName: 'Mathematics',
+            entries: [
+              { id: 'uuid', title: 'Quiz 1', type: 'quiz', score: 88, maxScore: 100, percent: 88.0, note: null, releasedAt: '2026-04-20T10:00:00.000Z' },
+            ],
+          },
+        ],
+      },
+    },
+  })
+  @ApiResponse({ status: 403, description: 'Not allowed to view this student' })
+  listForStudentByTerm(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @Param('termId', ParseUUIDPipe) termId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.listForStudentByTerm(studentId, termId, user);
   }
 }

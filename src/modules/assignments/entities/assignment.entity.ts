@@ -40,6 +40,10 @@ export class Assignment {
   @Column({ type: 'boolean', default: false })
   published: boolean;
 
+  /** Term this assignment belongs to */
+  @Column({ name: 'term_id', type: 'uuid' })
+  termId: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

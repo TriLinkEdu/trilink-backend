@@ -841,24 +841,20 @@ export class ChatService {
   async getPresence(userIds: string[]): Promise<Record<string, { isOnline: boolean; lastSeenAt: string | null }>> {
     if (userIds.length > 100) throw new BadRequestException('Maximum 100 userIds allowed');
     if (!userIds.length) return {};
-    const users = await this.convRepo.manager
-      .getRepository(User)
-      .find({ where: { id: In(userIds) } });
 
     const result: Record<string, { isOnline: boolean; lastSeenAt: string | null }> = {};
-    for (const u of users) {
-      result[u.id] = {
-        isOnline: u.isOnline ?? false,
-        lastSeenAt: u.lastSeenAt ? u.lastSeenAt.toISOString() : null,
+    for (const uid of userIds) {
+      result[uid] = {
+        isOnline: this.onlineUserIds.has(uid),
+        lastSeenAt: null,
       };
     }
     return result;
   }
 
   async setOnline(userId: string, isOnline: boolean): Promise<void> {
-    await this.convRepo.manager
-      .getRepository(User)
-      .update(userId, { isOnline, lastSeenAt: new Date() });
+    if (isOnline) this.onlineUserIds.add(userId);
+    else this.onlineUserIds.delete(userId);
   }
 
   async getUserConversationIds(userId: string): Promise<string[]> {

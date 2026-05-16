@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -18,6 +19,8 @@ import { Subject } from '../school-structure/entities/subject.entity';
 
 @Injectable()
 export class GradesService {
+  private readonly logger = new Logger(GradesService.name);
+
   constructor(
     @InjectRepository(GradeEntry) private readonly repo: Repository<GradeEntry>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
@@ -36,7 +39,12 @@ export class GradesService {
     if (viewer.role === UserRole.ADMIN) return;
     const co = await this.coRepo.findOne({ where: { id: classOfferingId } });
     if (!co) throw new NotFoundException('Class offering not found');
-    if (co.teacherId !== viewer.id) throw new ForbiddenException('You do not teach this class');
+    if (co.teacherId !== viewer.id) {
+      this.logger.warn(
+        `Forbidden: viewer ${viewer.id} (role=${viewer.role}) tried to access class ${classOfferingId} owned by teacher ${co.teacherId}`,
+      );
+      throw new ForbiddenException('You do not teach this class');
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -83,6 +91,7 @@ export class GradesService {
       maxScore?: number;
       note?: string | null;
       examAttemptId?: string | null;
+      termId: string;
     },
     teacher: User,
   ) {
@@ -104,6 +113,7 @@ export class GradesService {
       maxScore: body.maxScore ?? 100,
       note: body.note ?? null,
       examAttemptId: body.examAttemptId ?? null,
+      termId: body.termId,
     });
     return this.repo.save(entry);
   }
@@ -119,6 +129,7 @@ export class GradesService {
       type: GradeEntryType;
       maxScore: number;
       note?: string | null;
+      termId: string;
       entries: { studentId: string; score: number | null }[];
     },
     teacher: User,
@@ -134,6 +145,7 @@ export class GradesService {
         existing.score = e.score;
         existing.maxScore = body.maxScore;
         existing.note = body.note ?? existing.note;
+        if (body.termId !== undefined) existing.termId = body.termId;
         saved.push(await this.repo.save(existing));
       } else {
         const entry = this.repo.create({
@@ -145,6 +157,7 @@ export class GradesService {
           score: e.score,
           maxScore: body.maxScore,
           note: body.note ?? null,
+          termId: body.termId,
         });
         saved.push(await this.repo.save(entry));
       }
@@ -162,6 +175,9 @@ export class GradesService {
   ) {
     const entry = await this.repo.findOne({ where: { id } });
     if (!entry) throw new NotFoundException('Grade entry not found');
+    this.logger.debug(
+      `updateEntry: viewer=${viewer.id} (role=${viewer.role}), entry.id=${entry.id}, entry.teacherId=${entry.teacherId}, entry.classOfferingId=${entry.classOfferingId}`,
+    );
     // Allow if admin, or if teacher owns the class, or if teacher created this entry
     if (viewer.role !== UserRole.ADMIN) {
       if (entry.teacherId !== viewer.id) {
@@ -212,16 +228,52 @@ export class GradesService {
     return { released: entries.length };
   }
 
+  /**
+   * Delete a single grade entry.
+   */
+  async deleteEntry(id: string, viewer: User) {
+    const entry = await this.repo.findOne({ where: { id } });
+    if (!entry) throw new NotFoundException('Grade entry not found');
+    this.logger.debug(
+      `deleteEntry: viewer=${viewer.id} (role=${viewer.role}), entry.id=${entry.id}, entry.teacherId=${entry.teacherId}, entry.classOfferingId=${entry.classOfferingId}`,
+    );
+    if (viewer.role !== UserRole.ADMIN) {
+      if (entry.teacherId !== viewer.id) {
+        await this.assertTeacherOwnsClass(viewer, entry.classOfferingId);
+      }
+    }
+    await this.repo.remove(entry);
+    return { ok: true };
+  }
+
+  /**
+   * Delete an entire assessment (all entries with the given classOfferingId + title).
+   */
+  async deleteGroup(filter: { classOfferingId: string; title: string }, viewer: User) {
+    await this.assertTeacherOwnsClass(viewer, filter.classOfferingId);
+    const entries = await this.repo.find({
+      where: { classOfferingId: filter.classOfferingId, title: filter.title },
+    });
+    if (entries.length === 0) throw new NotFoundException('Assessment not found');
+    await this.repo.remove(entries);
+    return { ok: true, deleted: entries.length };
+  }
+
   // ── Queries ───────────────────────────────────────────────────────────────
 
   /**
    * List all grade entries for a class, grouped by title.
    * Teacher/admin view.
    */
-  async listForClass(classOfferingId: string, viewer: User) {
+  async listForClass(classOfferingId: string, viewer: User, termId?: string) {
+    this.logger.debug(
+      `listForClass: viewer=${viewer.id} (role=${viewer.role}), classOfferingId=${classOfferingId}, termId=${termId ?? 'none'}`,
+    );
     await this.assertTeacherOwnsClass(viewer, classOfferingId);
+    const where: Record<string, unknown> = { classOfferingId };
+    if (termId) where.termId = termId;
     const entries = await this.repo.find({
-      where: { classOfferingId },
+      where,
       order: { createdAt: 'DESC' },
     });
 
@@ -338,6 +390,77 @@ export class GradesService {
   }
 
   /**
+   * Get all released grade entries for a student filtered by termId.
+   * Groups by subject.
+   */
+  async listForStudentByTerm(studentId: string, termId: string, viewer: User) {
+    if (viewer.role === UserRole.STUDENT && viewer.id !== studentId) {
+      throw new ForbiddenException('Cannot view another student\'s grades');
+    }
+    if (viewer.role === UserRole.PARENT) {
+      const link = await this.psRepo.findOne({ where: { parentId: viewer.id, studentId } });
+      if (!link) throw new ForbiddenException('Not linked to this student');
+    }
+
+    const entries = await this.repo.find({
+      where: { studentId, termId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const visible =
+      viewer.role === UserRole.ADMIN || viewer.role === UserRole.TEACHER
+        ? entries
+        : entries.filter((e) => e.releasedAt != null);
+
+    // Group by subject via classOffering
+    const subjectMap = new Map<
+      string,
+      { subjectId: string; subjectName: string; entries: typeof visible }
+    >();
+
+    for (const e of visible) {
+      const co = await this.coRepo.findOne({ where: { id: e.classOfferingId } });
+      if (!co) continue;
+      const subject = await this.subjectRepo.findOne({ where: { id: co.subjectId } });
+      const key = co.subjectId;
+      if (!subjectMap.has(key)) {
+        subjectMap.set(key, {
+          subjectId: co.subjectId,
+          subjectName: subject?.name ?? 'Unknown',
+          entries: [],
+        });
+      }
+      subjectMap.get(key)!.entries.push(e);
+    }
+
+    const student = await this.userRepo.findOne({ where: { id: studentId } });
+
+    return {
+      studentId,
+      studentName: student ? `${student.firstName} ${student.lastName}` : null,
+      termId,
+      subjects: [...subjectMap.values()].map((s) => ({
+        subjectId: s.subjectId,
+        subjectName: s.subjectName,
+        entries: s.entries.map((e) => ({
+          id: e.id,
+          title: e.title,
+          type: e.type,
+          score: e.score,
+          maxScore: e.maxScore,
+          percent:
+            e.score != null && e.maxScore > 0
+              ? Math.round((e.score / e.maxScore) * 1000) / 10
+              : null,
+          note: e.note,
+          releasedAt: e.releasedAt,
+          createdAt: e.createdAt,
+        })),
+      })),
+    };
+  }
+
+  /**
    * Auto-create a grade entry from an assignment submission.
    */
   async autoCreateFromAssignment(body: {
@@ -348,6 +471,7 @@ export class GradesService {
     submissionId: string;
     score: number;
     maxScore: number;
+    termId: string;
   }) {
     const existing = await this.repo.findOne({ where: { classOfferingId: body.classOfferingId, studentId: body.studentId, title: body.title } });
     if (existing) {
@@ -363,6 +487,7 @@ export class GradesService {
       type: GradeEntryType.ASSIGNMENT,
       score: body.score,
       maxScore: body.maxScore,
+      termId: body.termId,
       releasedAt: new Date(),
     }));
   }
@@ -378,6 +503,7 @@ export class GradesService {
     examAttemptId: string;
     score: number | null;
     maxScore: number;
+    termId: string;
   }) {
     // Check if already exists for this attempt
     const existing = await this.repo.findOne({ where: { examAttemptId: body.examAttemptId } });
@@ -397,6 +523,7 @@ export class GradesService {
         score: body.score,
         maxScore: body.maxScore,
         examAttemptId: body.examAttemptId,
+        termId: body.termId,
       }),
     );
   }

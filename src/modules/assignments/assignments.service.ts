@@ -92,6 +92,7 @@ export class AssignmentsService {
     attachmentFileId?: string;
     deadline: string;
     maxScore?: number;
+    termId: string;
   }, teacher: User) {
     const co = await this.coRepo.findOne({ where: { id: body.classOfferingId } });
     if (!co) throw new NotFoundException('Class offering not found');
@@ -107,6 +108,7 @@ export class AssignmentsService {
       attachmentFileId: body.attachmentFileId ?? null,
       deadline: new Date(body.deadline),
       maxScore: body.maxScore ?? 100,
+      termId: body.termId,
       published: false,
     }));
     return this.enrichAssignment(assignment);
@@ -119,6 +121,7 @@ export class AssignmentsService {
     attachmentFileId: string | null;
     deadline: string;
     maxScore: number;
+    termId: string;
   }>, viewer: User) {
     const a = await this.repo.findOne({ where: { id } });
     if (!a) throw new NotFoundException('Assignment not found');
@@ -130,6 +133,7 @@ export class AssignmentsService {
     if (body.attachmentFileId !== undefined) a.attachmentFileId = body.attachmentFileId;
     if (body.deadline !== undefined) a.deadline = new Date(body.deadline);
     if (body.maxScore !== undefined) a.maxScore = body.maxScore;
+    if (body.termId !== undefined) a.termId = body.termId;
     const saved = await this.repo.save(a);
     return this.enrichAssignment(saved);
   }
@@ -175,27 +179,29 @@ export class AssignmentsService {
 
   // ── Listing ───────────────────────────────────────────────────────────────
 
-  async listForTeacher(teacherId: string, classOfferingId?: string) {
+  async listForTeacher(teacherId: string, classOfferingId?: string, termId?: string) {
     const qb = this.repo.createQueryBuilder('a')
       .where('a.teacher_id = :tid', { tid: teacherId })
       .orderBy('a.deadline', 'ASC');
     if (classOfferingId) qb.andWhere('a.class_offering_id = :cid', { cid: classOfferingId });
+    if (termId) qb.andWhere('a.term_id = :tid', { tid: termId });
     const list = await qb.getMany();
     return Promise.all(list.map(a => this.enrichAssignment(a)));
   }
 
-  async listForStudent(studentId: string, viewer: User) {
+  async listForStudent(studentId: string, viewer: User, termId?: string) {
     await this.assertCanViewStudent(viewer, studentId);
     const enrollments = await this.enrRepo.find({ where: { studentId, status: 'active' } });
     const classIds = enrollments.map(e => e.classOfferingId);
     if (!classIds.length) return [];
 
-    const assignments = await this.repo
+    const qb = this.repo
       .createQueryBuilder('a')
       .where('a.class_offering_id IN (:...ids)', { ids: classIds })
       .andWhere('a.published = :pub', { pub: true })
-      .orderBy('a.deadline', 'ASC')
-      .getMany();
+      .orderBy('a.deadline', 'ASC');
+    if (termId) qb.andWhere('a.term_id = :tid', { tid: termId });
+    const assignments = await qb.getMany();
 
     return Promise.all(assignments.map(async (a) => {
       const enriched = await this.enrichAssignment(a);
@@ -331,6 +337,7 @@ export class AssignmentsService {
       submissionId: sub.id,
       score: sub.score,
       maxScore: a.maxScore,
+      termId: a.termId,
     }).catch(() => {});
 
     return saved;

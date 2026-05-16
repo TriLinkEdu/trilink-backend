@@ -5,19 +5,26 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TYPEORM_ENTITIES } from './typeorm-entities';
 import { getPostgresConnectionFromEnv } from './postgres-env';
+import { User } from '../modules/users/entities/user.entity';
+import { SeedService } from './seed.service';
 
 @Module({
   imports: [
+    TypeOrmModule.forFeature([User]),
     TypeOrmModule.forRootAsync({
       useFactory: (config: ConfigService) => {
         const dbType = config.get<string>('database.type') || 'postgres';
-        const loggingEnv = process.env.DB_LOGGING;
+        const loggingEnv = process.env.DB_LOGGING || process.env.TYPEORM_LOGGING;
         const logging = loggingEnv == null
           ? process.env.NODE_ENV === 'development'
           : ['true', '1', 'yes'].includes(loggingEnv.toLowerCase());
+        const synchronizeEnv = process.env.TYPEORM_SYNCHRONIZE;
+        const synchronize = synchronizeEnv == null
+          ? process.env.NODE_ENV !== 'production'
+          : ['true', '1', 'yes'].includes(synchronizeEnv.toLowerCase());
         const common = {
           entities: TYPEORM_ENTITIES,
-          synchronize: process.env.NODE_ENV !== 'production',
+          synchronize,
           logging,
         };
         if (dbType === 'sqlite') {
@@ -40,6 +47,7 @@ import { getPostgresConnectionFromEnv } from './postgres-env';
       inject: [ConfigService],
     }),
   ],
+  providers: [SeedService],
   exports: [TypeOrmModule],
 })
 export class DatabaseModule {}

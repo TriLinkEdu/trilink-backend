@@ -30,6 +30,7 @@ export type ExamCreateInput = {
   title: string;
   academicYearId: string;
   classOfferingId: string | null;
+  termId?: string | null;
   opensAt: Date;
   closesAt: Date;
   durationMinutes: number;
@@ -198,6 +199,7 @@ export class ExamsService {
         title: body.title,
         academicYearId: body.academicYearId,
         classOfferingId: body.classOfferingId,
+        termId: body.termId ?? null,
         opensAt: body.opensAt,
         closesAt: body.closesAt,
         durationMinutes: body.durationMinutes,
@@ -216,9 +218,10 @@ export class ExamsService {
     e.maxPoints = maxPoints;
     return this.examRepo.save(e);
   }
-
-  async listExams(yearId: string | undefined, viewer: User) {
+, termId?: string) {
     const qb = this.examRepo.createQueryBuilder('e').orderBy('e.opensAt', 'DESC');
+    if (yearId) qb.andWhere('e.academic_year_id = :y', { y: yearId });
+    if (termId) qb.andWhere('e.term_id = :t', { t: termopensAt', 'DESC');
     if (yearId) qb.andWhere('e.academic_year_id = :y', { y: yearId });
     if (viewer.role === UserRole.STUDENT) {
       qb.andWhere('e.published = :pub', { pub: true });
@@ -520,15 +523,18 @@ export class ExamsService {
           }),
         });
 
-        // Auto-create a grade entry in the grades ledger
-        if (exam.classOfferingId) {
-          void this.gradesService.autoCreateFromExamAttempt({
-            classOfferingId: exam.classOfferingId,
-            studentId: refreshed.studentId,
-            teacherId: exam.createdById,
-            examTitle: exam.title,
-            examAttemptId: refreshed.id,
-            score: refreshed.score,
+        //if (exam.termId) {
+            void this.gradesService.autoCreateFromExamAttempt({
+              classOfferingId: exam.classOfferingId,
+              studentId: refreshed.studentId,
+              teacherId: exam.createdById,
+              examTitle: exam.title,
+              examAttemptId: refreshed.id,
+              score: refreshed.score,
+              maxScore: exam.maxPoints ?? 100,
+              termId: exam.termId,
+            }).catch(() => { /* non-blocking */ });
+          }
             maxScore: exam.maxPoints ?? 100,
           }).catch(() => { /* non-blocking */ });
         }
@@ -548,15 +554,16 @@ export class ExamsService {
     if (score < 0 || score > max) {
       throw new BadRequestException(`Score must be between 0 and ${max} (exam maxPoints)`);
     }
-    a.score = score;
-    a.gradedById = viewer.id;
-    const saved = await this.attRepo.save(a);
-
-    // Sync updated score to grade ledger
-    if (exam.classOfferingId) {
+    a.score = score; && exam.termId) {
       void this.gradesService.autoCreateFromExamAttempt({
         classOfferingId: exam.classOfferingId,
         studentId: a.studentId,
+        teacherId: exam.createdById,
+        examTitle: exam.title,
+        examAttemptId: a.id,
+        score,
+        maxScore: max,
+        termId: exam.termIdstudentId,
         teacherId: exam.createdById,
         examTitle: exam.title,
         examAttemptId: a.id,
