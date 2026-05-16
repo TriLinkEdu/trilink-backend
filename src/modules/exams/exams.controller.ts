@@ -40,7 +40,7 @@ class ExamDto {
   @IsOptional()
   @IsNumber()
   maxPoints?: number;
-  @ApiProperty({ required: false }) @IsOptional() @IsUUID() termId?: string;
+  @ApiProperty() @IsUUID() termId: string;
 }
 
 class PatchExamDto {

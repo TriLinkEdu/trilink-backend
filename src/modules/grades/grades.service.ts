@@ -83,7 +83,7 @@ export class GradesService {
       maxScore?: number;
       note?: string | null;
       examAttemptId?: string | null;
-      termId?: string | null;
+      termId: string;
     },
     teacher: User,
   ) {
@@ -105,7 +105,7 @@ export class GradesService {
       maxScore: body.maxScore ?? 100,
       note: body.note ?? null,
       examAttemptId: body.examAttemptId ?? null,
-      termId: body.termId ?? null,
+      termId: body.termId,
     });
     return this.repo.save(entry);
   }
@@ -121,7 +121,7 @@ export class GradesService {
       type: GradeEntryType;
       maxScore: number;
       note?: string | null;
-      termId?: string | null;
+      termId: string;
       entries: { studentId: string; score: number | null }[];
     },
     teacher: User,
@@ -149,7 +149,7 @@ export class GradesService {
           score: e.score,
           maxScore: body.maxScore,
           note: body.note ?? null,
-          termId: body.termId ?? null,
+          termId: body.termId,
         });
         saved.push(await this.repo.save(entry));
       }
@@ -452,6 +452,7 @@ export class GradesService {
     submissionId: string;
     score: number;
     maxScore: number;
+    termId: string;
   }) {
     const existing = await this.repo.findOne({ where: { classOfferingId: body.classOfferingId, studentId: body.studentId, title: body.title } });
     if (existing) {
@@ -467,6 +468,7 @@ export class GradesService {
       type: GradeEntryType.ASSIGNMENT,
       score: body.score,
       maxScore: body.maxScore,
+      termId: body.termId,
       releasedAt: new Date(),
     }));
   }
@@ -482,6 +484,7 @@ export class GradesService {
     examAttemptId: string;
     score: number | null;
     maxScore: number;
+    termId: string;
   }) {
     // Check if already exists for this attempt
     const existing = await this.repo.findOne({ where: { examAttemptId: body.examAttemptId } });
@@ -501,6 +504,7 @@ export class GradesService {
         score: body.score,
         maxScore: body.maxScore,
         examAttemptId: body.examAttemptId,
+        termId: body.termId,
       }),
     );
   }

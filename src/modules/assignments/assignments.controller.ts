@@ -33,7 +33,7 @@ class CreateAssignmentDto {
   @ApiProperty({ example: '2026-05-15T23:59:00.000Z', description: 'ISO deadline' })
   @IsDateString() deadline: string;
   @ApiPropertyOptional({ default: 100 }) @IsOptional() @IsNumber() @Min(1) maxScore?: number;
-  @ApiPropertyOptional() @IsOptional() @IsUUID() termId?: string;
+  @ApiProperty() @IsUUID() termId: string;
 }
 
 class UpdateAssignmentDto {

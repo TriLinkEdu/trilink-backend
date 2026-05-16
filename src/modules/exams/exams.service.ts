@@ -29,7 +29,7 @@ export type ExamCreateInput = {
   minStayMinutes?: number;
   createdById: string;
   maxPoints?: number;
-  termId?: string | null;
+  termId: string;
 };
 
 @Injectable()
