@@ -181,10 +181,10 @@ export class AssignmentsService {
 
   async listForTeacher(teacherId: string, classOfferingId?: string, termId?: string) {
     const qb = this.repo.createQueryBuilder('a')
-      .where('a.teacher_id = :tid', { tid: teacherId })
+      .where('a.teacher_id = :teacherId', { teacherId })
       .orderBy('a.deadline', 'ASC');
     if (classOfferingId) qb.andWhere('a.class_offering_id = :cid', { cid: classOfferingId });
-    if (termId) qb.andWhere('a.term_id = :tid', { tid: termId });
+    if (termId) qb.andWhere('a.term_id = :termId', { termId });
     const list = await qb.getMany();
     return Promise.all(list.map(a => this.enrichAssignment(a)));
   }
@@ -200,7 +200,7 @@ export class AssignmentsService {
       .where('a.class_offering_id IN (:...ids)', { ids: classIds })
       .andWhere('a.published = :pub', { pub: true })
       .orderBy('a.deadline', 'ASC');
-    if (termId) qb.andWhere('a.term_id = :tid', { tid: termId });
+    if (termId) qb.andWhere('a.term_id = :termId', { termId });
     const assignments = await qb.getMany();
 
     return Promise.all(assignments.map(async (a) => {
