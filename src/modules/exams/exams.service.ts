@@ -523,20 +523,18 @@ export class ExamsService {
           }),
         });
 
-        //if (exam.termId) {
-            void this.gradesService.autoCreateFromExamAttempt({
-              classOfferingId: exam.classOfferingId,
-              studentId: refreshed.studentId,
-              teacherId: exam.createdById,
-              examTitle: exam.title,
-              examAttemptId: refreshed.id,
-              score: refreshed.score,
-              maxScore: exam.maxPoints ?? 100,
-              termId: exam.termId,
-            }).catch(() => { /* non-blocking */ });
-          }
+        if (exam.classOfferingId && exam.termId) {
+          void this.gradesService.autoCreateFromExamAttempt({
+            classOfferingId: exam.classOfferingId,
+            studentId: refreshed.studentId,
+            teacherId: exam.createdById,
+            examTitle: exam.title,
+            examAttemptId: refreshed.id,
+            score: refreshed.score,
             maxScore: exam.maxPoints ?? 100,
+            termId: exam.termId,
           }).catch(() => { /* non-blocking */ });
+        }
         }
       }
     }
@@ -554,7 +552,10 @@ export class ExamsService {
     if (score < 0 || score > max) {
       throw new BadRequestException(`Score must be between 0 and ${max} (exam maxPoints)`);
     }
-    a.score = score; && exam.termId) {
+    a.score = score;
+    const saved = await this.attRepo.save(a);
+
+    if (exam.classOfferingId && exam.termId) {
       void this.gradesService.autoCreateFromExamAttempt({
         classOfferingId: exam.classOfferingId,
         studentId: a.studentId,
@@ -563,12 +564,7 @@ export class ExamsService {
         examAttemptId: a.id,
         score,
         maxScore: max,
-        termId: exam.termIdstudentId,
-        teacherId: exam.createdById,
-        examTitle: exam.title,
-        examAttemptId: a.id,
-        score,
-        maxScore: max,
+        termId: exam.termId,
       }).catch(() => { /* non-blocking */ });
     }
     return saved;
