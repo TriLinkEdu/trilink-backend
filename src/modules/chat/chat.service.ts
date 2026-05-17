@@ -110,6 +110,8 @@ const MAX_MEDIA_BYTES = 50 * 1024 * 1024; // 50 MB
 
 @Injectable()
 export class ChatService {
+  private readonly onlineUserIds = new Set<string>();
+
   constructor(
     @InjectRepository(Conversation) private readonly convRepo: Repository<Conversation>,
     @InjectRepository(ConversationMember) private readonly memRepo: Repository<ConversationMember>,

@@ -218,17 +218,16 @@ export class ExamsService {
     e.maxPoints = maxPoints;
     return this.examRepo.save(e);
   }
-, termId?: string) {
+  async listExams(yearId: string | undefined, viewer: User, termId?: string) {
     const qb = this.examRepo.createQueryBuilder('e').orderBy('e.opensAt', 'DESC');
     if (yearId) qb.andWhere('e.academic_year_id = :y', { y: yearId });
-    if (termId) qb.andWhere('e.term_id = :t', { t: termopensAt', 'DESC');
-    if (yearId) qb.andWhere('e.academic_year_id = :y', { y: yearId });
+    if (termId) qb.andWhere('e.term_id = :t', { t: termId });
     if (viewer.role === UserRole.STUDENT) {
       qb.andWhere('e.published = :pub', { pub: true });
       const enrollments = await this.enrollmentRepo.find({
         where: yearId ? { studentId: viewer.id, academicYearId: yearId } : { studentId: viewer.id },
       });
-      const classIds = [...new Set(enrollments.map((e) => e.classOfferingId))];
+      const classIds = [...new Set(enrollments.map((enrollment) => enrollment.classOfferingId))];
       if (classIds.length > 0) {
         qb.andWhere('(e.class_offering_id IS NULL OR e.class_offering_id IN (:...classIds))', { classIds });
       } else {
@@ -239,8 +238,6 @@ export class ExamsService {
     }
     const exams = await qb.getMany();
 
-    // Enrich each exam with class offering details
-    // For students: also embed their own attempt so the grades page can read score/releasedAt
     return Promise.all(
       exams.map(async (exam) => {
         const base = {
@@ -534,7 +531,6 @@ export class ExamsService {
             maxScore: exam.maxPoints ?? 100,
             termId: exam.termId,
           }).catch(() => { /* non-blocking */ });
-        }
         }
       }
     }
@@ -867,13 +863,15 @@ export class ExamsService {
   async recordViolation(attemptId: string, reason: string): Promise<{ ok: true; locked: boolean; lockReason?: string }> {
     const a = await this.attRepo.findOne({ where: { id: attemptId } });
     if (!a) throw new NotFoundException('Attempt not found');
-    if (a.submittedAt) return { ok: true, locked: false }; // don't record violations after submission
+    if (a.submittedAt) return { ok: true, locked: false };
+
     let violations: Array<{ reason: string; timestamp: string }> = [];
     try {
       violations = JSON.parse(a.violationsJson || '[]');
     } catch {
       violations = [];
     }
+
     violations.push({ reason, timestamp: new Date().toISOString() });
     a.violationsJson = JSON.stringify(violations);
 
@@ -888,7 +886,6 @@ export class ExamsService {
 
     await this.attRepo.save(a);
 
-    // Broadcast violation to the teacher (exam owner)
     const exam = await this.examRepo.findOne({ where: { id: a.examId } });
     if (exam) {
       this.events.emitToUser(exam.createdById, 'attempt:violation', {
@@ -910,6 +907,7 @@ export class ExamsService {
         timestamp: new Date().toISOString(),
       });
     }
+
     return { ok: true, locked: a.isLocked, lockReason: a.lockReason ?? undefined };
   }
 
@@ -942,7 +940,6 @@ export class ExamsService {
       return { success: true };
     }
 
-    // Emit control event to the student for warn/force_submit flows.
     this.events.emitToUser(a.studentId, 'attempt:control', {
       attemptId: a.id,
       action,
@@ -989,37 +986,34 @@ export class ExamsService {
     }
   }
 
-  // ── Exam Student Roster ─────────────────────────────────────────────────────
-
   async getExamStudentRoster(examId: string, viewer: User) {
     if (viewer.role !== UserRole.ADMIN && viewer.role !== UserRole.TEACHER) {
       throw new ForbiddenException('Only staff can view the roster');
     }
     const ex = await this.oneExam(examId);
     this.assertExamEditor(ex, viewer);
-    // Get all attempts for this exam
-    const attempts = await this.attRepo.find({ where: { examId } });
-    const attemptMap = new Map(attempts.map((a) => [a.studentId, a]));
 
-    // If exam is class-scoped, use enrolled students; otherwise list all who have attempts
+    const attempts: ExamAttempt[] = await this.attRepo.find({ where: { examId } });
+    const attemptMap = new Map<string, ExamAttempt>(attempts.map((attempt) => [attempt.studentId, attempt]));
+
     let studentIds: string[] = [];
     if (ex.classOfferingId) {
-      const enrollmentRepo = this.attRepo.manager.getRepository('enrollments') as Repository<Enrollment>;
+      const enrollmentRepo = this.attRepo.manager.getRepository(Enrollment);
       const enrollments = await enrollmentRepo.find({ where: { classOfferingId: ex.classOfferingId } });
-      studentIds = enrollments.map((e) => e.studentId);
+      studentIds = enrollments.map((enrollment) => enrollment.studentId);
     } else {
-      studentIds = [...new Set(attempts.map((a) => a.studentId))];
+      studentIds = [...new Set(attempts.map((attempt) => attempt.studentId))];
     }
 
-    const users = await this.userRepo.find({
+    const users: User[] = await this.userRepo.find({
       where: { id: In(studentIds) },
       select: ['id', 'firstName', 'lastName', 'email'],
     });
-    const userMap = new Map(users.map((u) => [u.id, u]));
+    const userMap = new Map<string, User>(users.map((user) => [user.id, user]));
 
     const out = studentIds.map((sid) => {
       const u = userMap.get(sid) ?? null;
-      const att = attemptMap.get(sid) ?? null;
+      const att: ExamAttempt | null = attemptMap.get(sid) ?? null;
       return {
         studentId: sid,
         firstName: u?.firstName ?? null,
@@ -1044,6 +1038,7 @@ export class ExamsService {
           : 0,
       };
     });
+
     return { examId, classOfferingId: ex.classOfferingId, students: out };
   }
 }
