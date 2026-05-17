@@ -180,9 +180,21 @@ export class GradesService {
     this.logger.debug(
       `updateEntry: viewer=${viewer.id} (role=${viewer.role}), entry.id=${entry.id}, entry.teacherId=${entry.teacherId}, entry.classOfferingId=${entry.classOfferingId}`,
     );
+    console.log(`[DEBUG] updateEntry invoked by viewer: ${viewer.id}, role: ${viewer.role}`);
+
     // Allow admin; allow any teacher to edit existing entries
     if (viewer.role !== UserRole.ADMIN && viewer.role !== UserRole.TEACHER) {
+      console.log(`[DEBUG] updateEntry throwing Forbidden: role ${viewer.role} is not admin or teacher`);
       throw new ForbiddenException('Only admin or teacher can update grades');
+    }
+    
+    console.log(`[DEBUG] updateEntry calling assertTeacherOwnsClass for class ${entry.classOfferingId}`);
+    try {
+      await this.assertTeacherOwnsClass(viewer, entry.classOfferingId);
+      console.log(`[DEBUG] updateEntry assertTeacherOwnsClass passed`);
+    } catch (err) {
+      console.log(`[DEBUG] updateEntry assertTeacherOwnsClass threw error:`, err.message);
+      throw err;
     }
     Object.assign(entry, body);
     return this.repo.save(entry);
@@ -236,6 +248,7 @@ export class GradesService {
     if (viewer.role !== UserRole.ADMIN && viewer.role !== UserRole.TEACHER) {
       throw new ForbiddenException('Only admin or teacher can delete assessments');
     }
+    await this.assertTeacherOwnsClass(viewer, filter.classOfferingId);
     const entries = await this.repo.find({
       where: { classOfferingId: filter.classOfferingId, title: filter.title },
     });
