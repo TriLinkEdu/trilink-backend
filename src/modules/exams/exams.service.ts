@@ -307,10 +307,10 @@ export class ExamsService {
       await this.assertStudentClassAccess(ex, viewer.id);
     }
 
-    const rows = await this.eqRepo.find({ where: { examId }, order: { orderIndex: 'ASC' } });
-    const qIds = [...new Set(rows.map((r) => r.questionId))];
+    const rows = (await this.eqRepo.find({ where: { examId: examId }, order: { orderIndex: 'ASC' } })) as ExamQuestion[];
+    const qIds = Array.from(new Set(rows.map((r: ExamQuestion) => r.questionId)));
     const questions = qIds.length ? await this.qRepo.find({ where: { id: In(qIds) } }) : [];
-    const qMap = new Map(questions.map((q) => [q.id, q]));
+    const qMap = new Map(questions.map((q: Question) => [q.id, q]));
 
     return rows.map((row) => {
       const q = qMap.get(row.questionId);
