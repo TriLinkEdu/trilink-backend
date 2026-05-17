@@ -8,6 +8,10 @@ import { ExamAttempt } from './entities/exam-attempt.entity';
 import { User } from '../users/entities/user.entity';
 import { Enrollment } from '../enrollments/entities/enrollment.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
+import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
+import { Grade } from '../school-structure/entities/grade.entity';
+import { Section } from '../school-structure/entities/section.entity';
+import { Subject } from '../school-structure/entities/subject.entity';
 import { ClassOfferingsModule } from '../class-offerings/class-offerings.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { GamificationModule } from '../gamification/gamification.module';
@@ -26,6 +30,10 @@ import { ExamAttemptsController } from './exam-attempts.controller';
       Enrollment,
       User,
       ParentStudent,
+      ClassOffering,
+      Grade,
+      Section,
+      Subject,
     ]),
     ClassOfferingsModule,
     NotificationsModule,
