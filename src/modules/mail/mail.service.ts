@@ -1,61 +1,75 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
-import type { Transporter } from 'nodemailer';
-import { UserRole } from '../users/entities/user.entity';
+import { Transporter, createTransport } from 'nodemailer';
+import SMTPTransport from 'nodemailer/lib/smtp-transport';
+import { UserRole } from '../../common/enums/user-role.enum';
+import { getWelcomeEmailTemplate } from './email-templates';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
+  private transport: Transporter<SMTPTransport.SentMessageInfo> | null = null;
 
-  constructor(private readonly config: ConfigService) {}
-
-  isConfigured(): boolean {
-    return !!this.config.get<string>('mail.host')?.trim();
+  constructor(private readonly config: ConfigService) {
+    this.initTransport();
   }
 
-  private createTransport(): Transporter | null {
-    const host = this.config.get<string>('mail.host')?.trim();
-    if (!host) return null;
-    const port = this.config.get<number>('mail.port') ?? 587;
-    const user = this.config.get<string>('mail.user')?.trim();
-    const pass = this.config.get<string>('mail.pass');
-    const secure = this.config.get<boolean>('mail.secure') ?? false;
-    const auth =
-      user && pass !== undefined && pass !== ''
-        ? { auth: { user, pass } }
-        : {};
-    return nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      ...auth,
+  private initTransport() {
+    const smtpConfig = this.config.get<{
+      host: string;
+      port: number;
+      secure: boolean;
+      auth: { user: string; pass: string };
+    }>('mail.smtp');
+
+    if (!smtpConfig?.host) {
+      this.logger.warn('SMTP not configured; emails will not be sent.');
+      return;
+    }
+
+    this.transport = createTransport({
+      host: smtpConfig.host,
+      port: smtpConfig.port,
+      secure: smtpConfig.secure,
+      auth: smtpConfig.auth,
     });
   }
 
-  async sendRegistrationCredentials(
+  async sendRegistrationEmail(
     to: string,
     firstName: string,
     tempPassword: string,
     role: UserRole,
   ): Promise<void> {
-    const transport = this.createTransport();
+    const transport = this.transport;
     if (!transport) {
       throw new Error('SMTP is not configured');
     }
-    const from = this.config.get<string>('mail.from') ?? 'TriLink <noreply@localhost>';
+
+    const from = this.config.get<string>('mail.from') ?? 'TriLink <noreply@trilink.edu.et>';
     const loginUrl = this.resolveLoginUrlForRole(role);
     const linkLabel = this.signInLinkLabel(role);
+
+    // Use the new professional HTML template
+    const html = getWelcomeEmailTemplate({
+      firstName,
+      tempPassword,
+      loginUrl,
+      linkLabel,
+    });
+
+    // Keep a simple text version for clients that don't support HTML
     const text = this.buildText(firstName, tempPassword, loginUrl, linkLabel);
-    const html = this.buildHtml(firstName, tempPassword, loginUrl, linkLabel);
+
     await transport.sendMail({
       from,
       to,
-      subject: 'Your TriLink account',
+      subject: '🎓 Welcome to TriLink Education — Your Account is Ready!',
       text,
       html,
     });
-    this.logger.log(`Registration email sent to ${to} (role=${role})`);
+
+    this.logger.log(`Welcome email sent to ${to} (role=${role})`);
   }
 
   private resolveLoginUrlForRole(role: UserRole): string {
@@ -76,13 +90,13 @@ export class MailService {
   private signInLinkLabel(role: UserRole): string {
     switch (role) {
       case UserRole.STUDENT:
-        return 'Open student sign-in';
+        return 'Sign In as Student';
       case UserRole.TEACHER:
-        return 'Open teacher sign-in';
+        return 'Sign In as Teacher';
       case UserRole.PARENT:
-        return 'Open parent sign-in';
+        return 'Sign In as Parent';
       default:
-        return 'Open TriLink sign-in';
+        return 'Sign In to TriLink';
     }
   }
 
@@ -90,34 +104,17 @@ export class MailService {
     const lines = [
       `Hello ${firstName},`,
       '',
-      'An account has been created for you on TriLink.',
+      'Welcome to TriLink Education — the comprehensive platform that connects students, teachers, and parents.',
       '',
-      `Your temporary password is: ${tempPassword}`,
+      'Your temporary password is:',
+      tempPassword,
       '',
-      'Please sign in and change your password when prompted.',
+      'For your security, please sign in and change this password immediately after your first login.',
     ];
     if (loginUrl) {
       lines.push('', `${linkLabel}: ${loginUrl}`);
     }
+    lines.push('', 'Need help? Contact us at support@trilink.edu.et');
     return lines.join('\n');
-  }
-
-  private buildHtml(firstName: string, tempPassword: string, loginUrl: string, linkLabel: string): string {
-    const link = loginUrl
-      ? `<p><a href="${this.escapeHtml(loginUrl)}">${this.escapeHtml(linkLabel)}</a></p>`
-      : '';
-    return `<p>Hello ${this.escapeHtml(firstName)},</p>
-<p>An account has been created for you on TriLink.</p>
-<p><strong>Temporary password:</strong> <code style="font-size:1.1em">${this.escapeHtml(tempPassword)}</code></p>
-<p>Please sign in and change your password when prompted.</p>
-${link}`;
-  }
-
-  private escapeHtml(s: string): string {
-    return s
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
   }
 }
