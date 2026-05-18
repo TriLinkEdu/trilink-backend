@@ -258,7 +258,7 @@ export class AuthController {
     let registrationEmailSent = false;
     if (this.mailService.isConfigured()) {
       try {
-        await this.mailService.sendRegistrationCredentials(
+        await this.mailService.sendRegistrationEmail(
           user.email,
           user.firstName,
           tempPassword ?? '',

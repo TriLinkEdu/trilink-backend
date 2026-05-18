@@ -133,14 +133,36 @@ export class DashboardsService {
     if (termId) annCountQb.andWhere('(a.term_id IS NULL OR a.term_id = :tid)', { tid: termId });
     const recentAnnouncements = await annCountQb.getCount();
 
-    const pendingGrade = await this.attempts
+    // Count exam attempts needing grading (submitted but no score yet)
+    // Include exams created by teacher OR exams in teacher's classes
+    const pendingExamAttempts = await this.attempts
       .createQueryBuilder('a')
       .innerJoin('exams', 'e', 'e.id = a.exam_id')
+      .leftJoin('class_offerings', 'co', 'co.id = e.class_offering_id')
       .where('a.submitted_at IS NOT NULL')
       .andWhere('a.score IS NULL')
-      .andWhere('e.created_by_id = :uid', { uid: userId })
+      .andWhere(
+        '(e.created_by_id = :uid OR co.teacher_id = :uid)',
+        { uid: userId }
+      )
       .andWhere(termId ? 'e.term_id = :tid' : '1=1', termId ? { tid: termId } : {})
       .getCount();
+
+    // Count assignment submissions needing grading
+    const pendingAssignmentSubmissions = await this.submissions
+      .createQueryBuilder('s')
+      .innerJoin('assignments', 'a', 'a.id = s.assignment_id')
+      .leftJoin('class_offerings', 'co', 'co.id = a.class_offering_id')
+      .where('s.submitted_at IS NOT NULL')
+      .andWhere('s.score IS NULL')
+      .andWhere(
+        '(a.teacher_id = :uid OR co.teacher_id = :uid)',
+        { uid: userId }
+      )
+      .andWhere(termId ? 'a.term_id = :tid' : '1=1', termId ? { tid: termId } : {})
+      .getCount();
+
+    const pendingGrade = pendingExamAttempts + pendingAssignmentSubmissions;
 
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
