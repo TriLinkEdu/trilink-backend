@@ -44,7 +44,7 @@ export class TextbooksController {
   /* ── Upload (Admin / Teacher only) ─────────────────────── */
 
   @Post('upload')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @ApiOperation({ summary: 'Upload a textbook PDF (+ optional cover image)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -114,7 +114,7 @@ export class TextbooksController {
   /* ── Soft-delete (Admin only) ───────────────────────────── */
 
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Soft-delete a textbook (Admin only)' })
   remove(@Param('id', ParseUUIDPipe) id: string) {

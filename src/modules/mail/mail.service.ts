@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Transporter, createTransport } from 'nodemailer';
 import SMTPTransport from 'nodemailer/lib/smtp-transport';
-import { UserRole } from '../../common/enums/user-role.enum';
+import { UserRole } from '../users/entities/user.entity';
 import { getWelcomeEmailTemplate } from './email-templates';
 
 @Injectable()
@@ -14,25 +14,29 @@ export class MailService {
     this.initTransport();
   }
 
-  private initTransport() {
-    const smtpConfig = this.config.get<{
-      host: string;
-      port: number;
-      secure: boolean;
-      auth: { user: string; pass: string };
-    }>('mail.smtp');
+  isConfigured(): boolean {
+    return this.transport !== null;
+  }
 
-    if (!smtpConfig?.host) {
-      this.logger.warn('SMTP not configured; emails will not be sent.');
+  private initTransport() {
+    const host = (this.config.get<string>('mail.host') || '').trim();
+    if (!host) {
+      this.logger.warn('SMTP not configured (set SMTP_HOST); emails will not be sent.');
       return;
     }
+    const port = this.config.get<number>('mail.port') ?? 587;
+    const secure = this.config.get<boolean>('mail.secure') ?? false;
+    const user = (this.config.get<string>('mail.user') || '').trim();
+    // Gmail app passwords are displayed with spaces but must be sent without them
+    const pass = (this.config.get<string>('mail.pass') || '').replace(/\s+/g, '');
 
     this.transport = createTransport({
-      host: smtpConfig.host,
-      port: smtpConfig.port,
-      secure: smtpConfig.secure,
-      auth: smtpConfig.auth,
+      host,
+      port,
+      secure,
+      auth: user ? { user, pass } : undefined,
     });
+    this.logger.log(`SMTP configured: ${host}:${port} (secure=${secure}, user=${user || '<none>'})`);
   }
 
   async sendRegistrationEmail(

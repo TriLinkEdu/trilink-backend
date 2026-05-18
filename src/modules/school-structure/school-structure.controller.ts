@@ -49,6 +49,7 @@ export class SchoolStructureController {
     private readonly svc: SchoolStructureService,
   ) {}
   @Get('grades')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
   @ApiOperation({ summary: 'List grades' })
   grades() {
     return this.svc.gradesList();
@@ -69,6 +70,7 @@ export class SchoolStructureController {
   }
 
   @Get('sections')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
   sections() {
     return this.svc.sectionsList();
   }
@@ -87,6 +89,7 @@ export class SchoolStructureController {
   }
 
   @Get('subjects')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
   subjects() {
     return this.svc.subjectsList();
   }
