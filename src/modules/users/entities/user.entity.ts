@@ -63,6 +63,12 @@ export class User {
   @Column({ type: 'varchar', length: 120, nullable: true })
   experience: string | null;
 
+  @Column({ name: 'is_online', type: 'boolean', default: false })
+  isOnline: boolean;
+
+  @Column({ name: 'last_seen_at', type: 'timestamptz', nullable: true })
+  lastSeenAt: Date | null;
+
   /** Teacher profile address: country */
   @Column({ type: 'varchar', length: 120, nullable: true })
   country: string | null;

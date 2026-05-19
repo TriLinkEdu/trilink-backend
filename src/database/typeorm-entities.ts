@@ -41,8 +41,6 @@ import { StudentProfile } from '../modules/student-profiles/entities/student-pro
 import { GradeEntry } from '../modules/grades/entities/grade-entry.entity';
 import { Assignment } from '../modules/assignments/entities/assignment.entity';
 import { AssignmentSubmission } from '../modules/assignments/entities/assignment-submission.entity';
-import { HomeroomAssignment } from '../modules/homeroom/entities/homeroom-assignment.entity';
-import { ReportCardRemark } from '../modules/report-cards/entities/report-card-remark.entity';
 // Entities added by other team members
 import { Textbook } from '../modules/textbooks/entities/textbook.entity';
 import { LearningMaterial } from '../modules/learning-materials/entities/learning-material.entity';
@@ -92,8 +90,6 @@ export const TYPEORM_ENTITIES = [
   GradeEntry,
   Assignment,
   AssignmentSubmission,
-  HomeroomAssignment,
-  ReportCardRemark,
   // Entities added by other team members
   Textbook,
   LearningMaterial,

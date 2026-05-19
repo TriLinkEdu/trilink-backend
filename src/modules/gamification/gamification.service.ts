@@ -5,15 +5,12 @@ import {
   NotFoundException,
   OnModuleInit,
   Inject,
-  forwardRef,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, IsNull, Like, LessThan, Not, Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { XpService } from './services/xp.service';
 import { Badge } from './entities/badge.entity';
 import { UserBadge } from './entities/user-badge.entity';
 import { Achievement } from './entities/achievement.entity';
@@ -52,7 +49,6 @@ export class GamificationService implements OnModuleInit {
     @InjectRepository(Topic) private readonly topicRepo: Repository<Topic>,
     private readonly notifications: NotificationsService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
-    @Inject(forwardRef(() => XpService)) private readonly xpService: XpService,
   ) {}
 
   private readonly defaultBadges: Array<{
@@ -179,11 +175,6 @@ export class GamificationService implements OnModuleInit {
       awardedById,
       pointsEarned: badge.pointsValue 
     }));
-    // Award XP to the student's GamificationProfile so their level, progress
-    // bar, and Redis leaderboard rank all update atomically.
-    if (badge.pointsValue && badge.pointsValue > 0) {
-      await this.xpService.awardXp(userId, badge.pointsValue, 'badge_award', badge.id);
-    }
     await this.notifications.createForUser(userId, {
       type: 'badge',
       title: 'New badge',
@@ -194,12 +185,7 @@ export class GamificationService implements OnModuleInit {
   }
 
   listBadges() {
-    return this.badgeRepo
-      .createQueryBuilder('b')
-      .where("b.key NOT LIKE 'quiz_reward_%'")
-      .andWhere("b.key NOT LIKE 'mission_%'")
-      .orderBy('b.name', 'ASC')
-      .getMany();
+    return this.badgeRepo.find({ order: { name: 'ASC' } });
   }
 
   async createBadge(body: { key: string; name: string; description?: string; iconKey?: string; pointsValue?: number }) {
@@ -332,43 +318,69 @@ export class GamificationService implements OnModuleInit {
     const cached = await this.cacheManager.get(cacheKey);
     if (cached) return cached;
 
-    // ── Use GamificationProfile.totalXp as the single XP source of truth ──
-    // This keeps the leaderboard consistent with what the home dashboard and
-    // hub show (both derive XP from totalBadgePoints / GamificationProfile).
-    // The old approach (SUM user_badges with a date filter) caused "0 XP" on
-    // the leaderboard for students who earned all their XP before this week.
-    const take = Math.min(Math.max(limit, 1), 100);
+    let fromDate: Date | undefined;
+    const now = new Date();
+    if (normalized === 'weekly') {
+      fromDate = new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate() - 6,
+        0,
+        0,
+        0,
+        0,
+      ));
+    } else if (normalized === 'monthly') {
+      fromDate = new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate() - 29,
+        0,
+        0,
+        0,
+        0,
+      ));
+    }
 
-    const rows: Array<{
-      userId: string;
-      totalXp: string;
-      firstName: string;
-      lastName: string;
-      email: string;
-      grade: string | null;
-      section: string | null;
-    }> = await this.ubRepo.manager.query(
-      `SELECT gp.user_id   AS "userId",
-              gp.total_xp  AS "totalXp",
-              u.first_name AS "firstName",
-              u.last_name  AS "lastName",
-              u.email      AS "email",
-              u.grade      AS "grade",
-              u.section    AS "section"
-         FROM gamification_profiles gp
-         JOIN users u ON u.id = gp.user_id
-        WHERE u.role = 'student'
-          ${grade ? `AND u.grade = '${grade.replace(/'/g, "''")}'` : ''}
-          ${section ? `AND u.section = '${section.replace(/'/g, "''")}'` : ''}
-        ORDER BY gp.total_xp DESC, gp.user_id ASC
-        LIMIT $1`,
-      [take],
-    );
+    const qb = this.ubRepo
+      .createQueryBuilder('ub')
+      .innerJoin(User, 'u', 'u.id = ub.user_id')
+      .select('ub.user_id', 'userId')
+      .addSelect('SUM(ub.points_earned)', 'points')
+      .addSelect('u.first_name', 'firstName')
+      .addSelect('u.last_name', 'lastName')
+      .addSelect('u.email', 'email')
+      .addSelect('u.grade', 'grade')
+      .addSelect('u.section', 'section')
+      .where('u.role = :role', { role: UserRole.STUDENT });
+
+    if (fromDate) {
+      qb.andWhere('ub.awarded_at >= :fromDate', { fromDate });
+    }
+    if (grade) {
+      qb.andWhere('u.grade = :grade', { grade });
+    }
+    if (section) {
+      qb.andWhere('u.section = :section', { section });
+    }
+
+    const take = Math.min(Math.max(limit, 1), 100);
+    const rows = await qb
+      .groupBy('ub.user_id')
+      .addGroupBy('u.first_name')
+      .addGroupBy('u.last_name')
+      .addGroupBy('u.email')
+      .addGroupBy('u.grade')
+      .addGroupBy('u.section')
+      .orderBy('SUM(ub.points_earned)', 'DESC')
+      .addOrderBy('ub.user_id', 'ASC')
+      .take(take)
+      .getRawMany();
 
     const entries = rows.map((row, index) => ({
       rank: index + 1,
       userId: row.userId,
-      points: parseInt(row.totalXp ?? '0', 10),
+      points: Math.round(parseFloat(row.points) * 100) / 100,
       student: {
         firstName: row.firstName,
         lastName: row.lastName,
@@ -380,12 +392,12 @@ export class GamificationService implements OnModuleInit {
 
     const result = {
       period: normalized,
-      metric: 'totalXp',
+      metric: 'badgePoints',
       filters: { grade, section },
       entries,
     };
 
-    await this.cacheManager.set(cacheKey, result, 120_000); // 2 min TTL
+    await this.cacheManager.set(cacheKey, result, 300000); // 5 minutes
     return result;
   }
 
@@ -503,6 +515,33 @@ export class GamificationService implements OnModuleInit {
       xpNeededForNextLevel,
       weeklyXpEarned,
       weeklyXpTarget,
+    };
+  }
+
+  async nextBadgeProgressForUser(userId: string) {
+    const [points, badges, earnedBadges] = await Promise.all([
+      this.totalBadgePoints(userId),
+      this.listBadges(),
+      this.listUserBadges(userId),
+    ]);
+
+    const earnedBadgeIds = new Set(earnedBadges.map((badge) => badge.badgeId));
+    const nextBadge = badges
+      .filter((badge) => !earnedBadgeIds.has(badge.id))
+      .sort((left, right) => left.pointsValue - right.pointsValue)[0] ?? null;
+
+    const currentPoints = points.totalBadgePoints ?? 0;
+    const pointsToNextBadge = nextBadge ? Math.max(nextBadge.pointsValue - currentPoints, 0) : 0;
+    const progressPercent = nextBadge && nextBadge.pointsValue > 0
+      ? Math.min(100, Math.round((currentPoints / nextBadge.pointsValue) * 100))
+      : 100;
+
+    return {
+      userId,
+      totalBadgePoints: currentPoints,
+      nextBadge,
+      pointsToNextBadge,
+      progressPercent,
     };
   }
 
@@ -781,107 +820,102 @@ export class GamificationService implements OnModuleInit {
     return this.subjectRepo.find({ where: subjectIds.map((id) => ({ id })) });
   }
 
-  // ── Grade helpers ──────────────────────────────────────────────────────────
-
-  /**
-   * Parse the numeric grade from user.grade strings like "Grade 9", "9", "Grade 10".
-   * Falls back to 9 if the value is missing or unparseable (matches AI engine default).
-   */
-  private parseGradeNumber(gradeStr: string | null | undefined): number {
-    if (!gradeStr) return 9;
-    const match = gradeStr.match(/(\d+)/);
-    return match ? parseInt(match[1], 10) : 9;
-  }
-
-  // ── AI quiz generation ─────────────────────────────────────────────────────
-
-  /**
-   * Calls the AI Engine's real-time quiz generation endpoint.
-   * Sends the student's subject name, grade level, and ordered curriculum
-   * topic names so the LLM generates fully grade-scoped, context-aware questions.
-   *
-   * Returns normalised question objects ready for the mobile client.
-   * Throws on failure so the caller can fall back to the local question bank.
-   */
-  private async generateAiQuiz(
-    subject: Subject,
-    gradeLevel: number,
-    count: number,
-  ): Promise<Array<Record<string, unknown>>> {
-    const aiBase = (process.env.AI_SERVICE_URL || '').trim().replace(/\/$/, '');
-    if (!aiBase) throw new Error('AI_SERVICE_URL not configured');
-
-    // Fetch ordered curriculum topics for this subject to give the LLM real context
+  private async aiQuestionCandidatesForSubject(userId: string, subjectId: string) {
     const topicRows = await this.topicRepo.find({
-      where: { subjectId: subject.id },
+      where: { subjectId },
       order: { orderIndex: 'ASC', createdAt: 'ASC' },
-      take: 8,
+      take: 6,
     });
-    const topicNames = topicRows.map((t) => t.name);
+    if (!topicRows.length) return [] as Array<Record<string, unknown>>;
+
+    const aiBase = (process.env.AI_SERVICE_URL || '').trim().replace(/\/$/, '');
+    if (!aiBase) return [] as Array<Record<string, unknown>>;
 
     const key = (process.env.INTERNAL_API_KEY || '').trim();
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5_000);
+    const out: Array<Record<string, unknown>> = [];
 
-    try {
-      const res = await fetch(`${aiBase}/api/ai/content/generate-quiz`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(key ? { 'X-API-Key': key } : {}),
-        },
-        body: JSON.stringify({
-          subject: subject.name,
-          grade_level: gradeLevel,
-          topics: topicNames,
-          count,
-          difficulty: 'medium',
-        }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok) throw new Error(`AI Engine returned ${res.status}`);
-
-      const body = (await res.json()) as Record<string, unknown>;
-      const questions = (body['questions'] as Array<Record<string, unknown>> | undefined) || [];
-
-      if (!questions.length) throw new Error('AI Engine returned empty question list');
-
-      return questions;
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-
-  async listQuizzesForStudent(user: User) {
-    if (user.role !== UserRole.STUDENT) return [];
-
-    // Primary: subjects via active enrollments
-    let subjects = await this.enrolledSubjectsForStudent(user.id);
-
-    // Fallback: if no active enrollments, derive subjects from the grade→subject
-    // curriculum assignments. Chain: user.grade string → grades.name → grade_subjects.
-    if (subjects.length === 0 && user.grade) {
-      const rows: Array<{ id: string }> = await this.subjectRepo.manager.query(
-        `SELECT s.id
-           FROM subjects s
-           JOIN grade_subjects gs ON gs.subject_id = s.id
-           JOIN grades g ON g.id = gs.grade_id
-          WHERE g.name = $1
-          ORDER BY s.name ASC
-          LIMIT 6`,
-        [user.grade],
-      );
-      if (rows.length > 0) {
-        const ids = rows.map((r) => r.id);
-        subjects = await this.subjectRepo.find({
-          where: ids.map((id) => ({ id })),
-          order: { name: 'ASC' },
+    for (const topic of topicRows) {
+      try {
+        const params = new URLSearchParams({ limit: '5', difficulty: 'medium' });
+        const res = await fetch(`${aiBase}/api/ai/content/questions/${topic.id}?${params.toString()}`, {
+          method: 'GET',
+          headers: {
+            ...(key ? { 'X-API-Key': key } : {}),
+          },
         });
+        if (!res.ok) continue;
+        const body = (await res.json()) as Record<string, unknown>;
+        const questions = (body['questions'] as Array<Record<string, unknown>> | undefined) || [];
+        for (const q of questions) {
+          out.push({ ...q, topicId: topic.id, topicName: topic.name });
+        }
+      } catch (_) {
+        // ignore AI failures; caller falls back to local bank.
       }
     }
 
+    return out;
+  }
+
+  private normalizeAiQuestion(
+    raw: Record<string, unknown>,
+    index: number,
+  ): { id: string; text: string; options: string[]; correctIndex: number; type: string; pointValue: number } | null {
+    const id = String(raw['id'] ?? raw['question_id'] ?? `ai-q-${index + 1}`);
+    const text = String(raw['stem'] ?? raw['text'] ?? raw['question'] ?? '').trim();
+    if (!text) return null;
+
+    let options: string[] = [];
+    const optionsRaw = raw['options'];
+    if (Array.isArray(optionsRaw)) {
+      options = optionsRaw
+        .map((o) => {
+          if (typeof o === 'string') return o;
+          if (o && typeof o === 'object') {
+            const t = (o as Record<string, unknown>)['text'];
+            const l = (o as Record<string, unknown>)['label'];
+            return String(t ?? l ?? '').trim();
+          }
+          return String(o);
+        })
+        .filter((o) => o.length > 0);
+    }
+
+    if (options.length < 2) {
+      return null;
+    }
+
+    let correctIndex = 0;
+    const answerKey = raw['answer_key'] ?? raw['answerKey'] ?? raw['correctIndex'];
+    if (typeof answerKey === 'number') {
+      correctIndex = Math.trunc(answerKey);
+    } else if (typeof answerKey === 'string') {
+      const parsed = Number.parseInt(answerKey.trim(), 10);
+      if (Number.isFinite(parsed)) {
+        correctIndex = parsed;
+      } else {
+        const normalized = answerKey.trim().toLowerCase();
+        const match = options.findIndex((o) => o.trim().toLowerCase() === normalized);
+        if (match >= 0) correctIndex = match;
+      }
+    }
+    if (correctIndex < 0 || correctIndex >= options.length) {
+      correctIndex = 0;
+    }
+
+    return {
+      'id': id,
+      'text': text,
+      'options': options,
+      'correctIndex': correctIndex,
+      'type': 'multipleChoice',
+      'pointValue': 1,
+    };
+  }
+
+  async listQuizzesForStudent(user: User) {
+    if (user.role !== UserRole.STUDENT) return [];
+    const subjects = await this.enrolledSubjectsForStudent(user.id);
     const questionCount = this.readIntEnv('GAMIFICATION_QUIZ_QUESTION_COUNT', 5);
     const xpReward = this.readIntEnv('GAMIFICATION_QUIZ_REWARD', 50);
     return subjects.map((s) => ({
@@ -898,127 +932,64 @@ export class GamificationService implements OnModuleInit {
 
   async quizByIdForStudent(user: User, quizId: string) {
     if (user.role !== UserRole.STUDENT) throw new ForbiddenException('Only students can access quizzes');
-    
-    const cacheKey = `quiz:${user.id}:${quizId}`;
-    const cachedQuiz = await this.cacheManager.get<any>(cacheKey);
-    if (cachedQuiz) {
-      return cachedQuiz;
-    }
-
     const subjectId = quizId.replace(/^quiz-/, '');
-
-    // Primary: subjects via active enrollments
-    let subjects = await this.enrolledSubjectsForStudent(user.id);
-
-    // Fallback: grade-based curriculum subjects (same logic as listQuizzesForStudent)
-    if (subjects.length === 0 && user.grade) {
-      const rows: Array<{ id: string }> = await this.subjectRepo.manager.query(
-        `SELECT s.id
-           FROM subjects s
-           JOIN grade_subjects gs ON gs.subject_id = s.id
-           JOIN grades g ON g.id = gs.grade_id
-          WHERE g.name = $1
-          ORDER BY s.name ASC
-          LIMIT 6`,
-        [user.grade],
-      );
-      if (rows.length > 0) {
-        const ids = rows.map((r) => r.id);
-        subjects = await this.subjectRepo.find({
-          where: ids.map((id) => ({ id })),
-          order: { name: 'ASC' },
-        });
-      }
-    }
-
+    const subjects = await this.enrolledSubjectsForStudent(user.id);
     const subject = subjects.find((s) => s.id === subjectId);
     if (!subject) throw new NotFoundException('Quiz not found');
 
     const questionLimit = this.readIntEnv('GAMIFICATION_QUIZ_QUESTION_COUNT', 5);
-    const gradeLevel   = this.parseGradeNumber(user.grade);
+    const rows = await this.questionRepo.find({
+      where: { subjectId },
+      take: questionLimit,
+      order: { createdAt: 'DESC' },
+    });
+    const questions = rows
+      .map((q) => {
+        try {
+          const options = JSON.parse(q.optionsJson || '[]');
+          const answer = parseInt(q.answerKey || '', 10);
+          if (!Array.isArray(options) || options.length < 2 || !Number.isFinite(answer)) return null;
+          return {
+            id: q.id,
+            text: q.stem,
+            options: options.map((o: unknown) => String(o)),
+            correctIndex: answer,
+            type: 'multipleChoice',
+            pointValue: 1,
+          };
+        } catch (_) {
+          return null;
+        }
+      })
+      .filter((q): q is NonNullable<typeof q> => q !== null);
 
-    // ── 1. Try AI generation (real-time, grade-scoped, curriculum-contextualised)
-    let finalQuestions: Array<Record<string, unknown>> = [];
-    let questionSource: 'ai' | 'local' = 'ai';
+    const aiCandidatesRaw = await this.aiQuestionCandidatesForSubject(user.id, subjectId);
+    const aiQuestions = aiCandidatesRaw
+      .map((q, i) => this.normalizeAiQuestion(q, i))
+      .filter((q): q is NonNullable<typeof q> => q !== null)
+      .slice(0, questionLimit);
 
-    try {
-      const aiQuestions = await this.generateAiQuiz(subject, gradeLevel, questionLimit);
-      // AI engine already normalises to { id, text, options, correctIndex, ... }
-      // Validate each question has the required shape before accepting
-      finalQuestions = aiQuestions
-        .filter((q) => {
-          const text    = String(q['text'] ?? '').trim();
-          const options = Array.isArray(q['options']) ? q['options'] as string[] : [];
-          const ci      = typeof q['correctIndex'] === 'number' ? q['correctIndex'] : -1;
-          return text.length > 0 && options.length >= 2 && ci >= 0 && ci < options.length;
-        })
-        .slice(0, questionLimit)
-        .map((q) => ({
-          id           : String(q['id'] ?? `ai-${Math.random().toString(36).slice(2)}`) ,
-          text         : String(q['text']),
-          options      : (q['options'] as string[]).map(String),
-          correctIndex : q['correctIndex'] as number,
-          type         : 'multipleChoice',
-          pointValue   : 1,
-        }));
-    } catch (_aiErr) {
-      // AI unavailable or timed out — fall through to local bank
-      questionSource = 'local';
-    }
-
-    // ── 2. Local question bank fallback ────────────────────────────────────────
-    // Used when AI Engine is down. Filtered by subjectId; grade mixing is a known
-    // limitation of the current schema and is accepted as an emergency safety net.
-    if (finalQuestions.length === 0) {
-      questionSource = 'local';
-      const rows = await this.questionRepo.find({
-        where: { subjectId },
-        take: questionLimit,
-        order: { createdAt: 'DESC' },
-      });
-      finalQuestions = rows
-        .map((q) => {
-          try {
-            const options = JSON.parse(q.optionsJson || '[]');
-            const answer  = parseInt(q.answerKey || '', 10);
-            if (!Array.isArray(options) || options.length < 2 || !Number.isFinite(answer)) return null;
-            return {
-              id          : q.id,
-              text        : q.stem,
-              options     : options.map((o: unknown) => String(o)),
-              correctIndex: answer,
-              type        : 'multipleChoice',
-              pointValue  : 1,
-            };
-          } catch (_) {
-            return null;
-          }
-        })
-        .filter((q): q is NonNullable<typeof q> => q !== null);
-    }
+    const finalQuestions = aiQuestions.length > 0
+      ? aiQuestions
+      : questions.length
+      ? questions
+      : [];
 
     if (finalQuestions.length === 0) {
-      throw new ServiceUnavailableException(
-        'No questions available for this subject yet. The AI Engine may be starting up — please retry in a moment.',
-      );
+      throw new NotFoundException('No questions available for this subject yet');
     }
 
-    const result = {
-      id            : quizId,
-      title         : `${subject.name} Quick Quiz`,
-      subjectId     : subject.id,
-      subjectName   : subject.name,
-      gradeLevel,
-      questionSource,
+    return {
+      id: quizId,
+      title: `${subject.name} Quick Quiz`,
+      subjectId: subject.id,
+      subjectName: subject.name,
       durationMinutes: 10,
-      questions     : finalQuestions,
-      isCompleted   : false,
+      questions: finalQuestions,
+      isCompleted: false,
       lifecycleState: 'published',
-      isTimeLimited : true,
+      isTimeLimited: true,
     };
-    
-    await this.cacheManager.set(cacheKey, result, 3600000); // 1 hour cache
-    return result;
   }
 
   async submitQuizForStudent(
@@ -1027,10 +998,8 @@ export class GamificationService implements OnModuleInit {
     answers: Record<string, number>,
   ) {
     const quiz = await this.quizByIdForStudent(user, quizId);
-    type QuizQuestion = { id: string; correctIndex: number };
-    const typedQuestions = quiz.questions as QuizQuestion[];
     let correct = 0;
-    for (const q of typedQuestions) {
+    for (const q of quiz.questions) {
       if (answers[q.id] === q.correctIndex) correct += 1;
     }
     const total = quiz.questions.length;
@@ -1060,29 +1029,13 @@ export class GamificationService implements OnModuleInit {
     const awardedBadges: string[] = [];
     let delta = 0;
     if (!existing) {
-      await this.ubRepo.save(
-        this.ubRepo.create({ 
-          userId: user.id, 
-          badgeId: rewardBadge.id, 
-          awardedById: null,
-          pointsEarned: xpEarned,
-        }),
-      );
+      await this.ubRepo.save(this.ubRepo.create({ userId: user.id, badgeId: rewardBadge.id, awardedById: null }));
       awardedBadges.push(rewardBadge.id);
       delta += xpEarned;
     }
 
     const missionMutation = await this.completeMission(user.id, this.missionId('quick_quiz', this.isoDate()));
     delta += missionMutation.xpDelta;
-
-    // Update gamification profile with total XP earned
-    if (delta > 0) {
-      await this.xpService.awardXp(user.id, delta, 'quiz', quizId);
-    }
-
-    // Fire-and-forget: propagate per-question correctness to BKT mastery model.
-    // Uses subjectId as topic_id proxy (best granularity without per-question topic mapping).
-    this.pushMasteryUpdates(user.id, quiz.subjectId, typedQuestions, answers).catch(() => undefined);
 
     const newlyUnlocked = await this.checkAndUnlockAchievements(user.id);
     const newAchievementIds = [
@@ -1095,9 +1048,6 @@ export class GamificationService implements OnModuleInit {
     const afterXp = beforeXp + delta;
     const afterLevel = this.levelFromXp(afterXp);
     const afterRank = await this.badgeLeaderboardRank(user.id);
-
-    const cacheKey = `quiz:${user.id}:${quizId}`;
-    await this.cacheManager.del(cacheKey);
 
     return {
       result: {
@@ -1120,33 +1070,6 @@ export class GamificationService implements OnModuleInit {
         leaderboardAfterRank: afterRank,
       },
     };
-  }
-
-  private async pushMasteryUpdates(
-    studentId: string,
-    topicId: string,
-    questions: Array<{ id: string; correctIndex: number }>,
-    answers: Record<string, number>,
-  ): Promise<void> {
-    const baseUrl = (process.env.AI_SERVICE_URL ?? '').trim().replace(/\/$/, '');
-    if (!baseUrl) return;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const apiKey = (process.env.INTERNAL_API_KEY ?? '').trim();
-    if (apiKey) headers['X-API-Key'] = apiKey;
-    await Promise.allSettled(
-      questions.map((q) =>
-        fetch(`${baseUrl}/api/ai/mastery/update`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            student_id: studentId,
-            topic_id: topicId,
-            is_correct: answers[q.id] === q.correctIndex,
-          }),
-          signal: AbortSignal.timeout(5_000),
-        }),
-      ),
-    );
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
@@ -1331,31 +1254,5 @@ export class GamificationService implements OnModuleInit {
     }
 
     return newlyUnlocked;
-  }
-  /** 
-   * Public wrapper used by GamificationHubService.
-   * Returns the next achievement the student can unlock, with progress details.
-   */
-  async nextBadgeProgressForUser(userId: string) {
-    const all = await this.listAchievementsForUser(userId);
-    // Find the first locked achievement with the most progress (% complete)
-    const locked = all
-      .filter((a) => !a.isUnlocked && a.progressTarget > 0)
-      .sort((a, b) => {
-        const pctA = a.progressCurrent / a.progressTarget;
-        const pctB = b.progressCurrent / b.progressTarget;
-        return pctB - pctA;
-      });
-
-    if (!locked.length) return null;
-
-    const next = locked[0];
-    return {
-      achievementId   : next.id,
-      title           : next.title,
-      progressCurrent : next.progressCurrent,
-      progressTarget  : next.progressTarget,
-      percentComplete : Math.round((next.progressCurrent / next.progressTarget) * 100),
-    };
   }
 }
