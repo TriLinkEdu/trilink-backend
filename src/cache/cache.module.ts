@@ -25,24 +25,23 @@ function buildCacheConfig() {
       useFactory: async () => {
         const redisHost = process.env.REDIS_HOST;
 
-        if (!redisHost) {
-          logger.warn('REDIS_HOST not set — using in-memory cache (not suitable for multi-instance)');
+        // Skip Redis if not configured, explicitly disabled, or using localhost
+        const skipRedis = !redisHost ||
+                          process.env.REDIS_ENABLED === 'false' ||
+                          ['localhost', '127.0.0.1', '::1'].includes(redisHost);
+
+        if (skipRedis) {
+          if (!redisHost) {
+            logger.warn('REDIS_HOST not set — using in-memory cache (not suitable for multi-instance)');
+          } else if (process.env.REDIS_ENABLED === 'false') {
+            logger.log('Redis disabled via REDIS_ENABLED=false — using in-memory cache');
+          } else {
+            logger.warn(`Redis host ${redisHost} is localhost — using in-memory cache`);
+          }
           return { ttl: 300000 };
         }
 
-        // Skip Redis if explicitly disabled
-        if (process.env.REDIS_ENABLED === 'false') {
-          logger.log('Redis disabled via REDIS_ENABLED=false — using in-memory cache');
-          return { ttl: 300000 };
-        }
-
-        // Skip Redis for localhost in production (won't work in containerized environments)
-        const isLocalhost = ['localhost', '127.0.0.1', '::1'].includes(redisHost);
-        if (isLocalhost && process.env.NODE_ENV === 'production') {
-          logger.warn(`Redis host ${redisHost} is localhost in production — using in-memory cache`);
-          return { ttl: 300000 };
-        }
-
+        // Redis is configured with a non-localhost host
         try {
           // eslint-disable-next-line @typescript-eslint/no-var-requires
           const { redisStore } = require('cache-manager-redis-yet');
