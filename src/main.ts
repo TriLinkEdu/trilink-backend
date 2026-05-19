@@ -57,58 +57,63 @@ async function bootstrap() {
     app.enableCors({ origin: true });
   }
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('TriLink API')
-    .setDescription(
-      'REST API for the TriLink school management platform. **Authentication:** use `POST /api/auth/login` to get tokens, then send `Authorization: Bearer <accessToken>` for protected routes. **Roles:** admin (full access, can register others), teacher, student, parent.',
-    )
-    .setVersion('1.0')
-    // Scheme name must match @ApiBearerAuth('JWT') on protected routes
-    .addBearerAuth(
-      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', description: 'Paste accessToken from login (no "Bearer " prefix needed in the box)' },
-      'JWT',
-    )
-    .addTag('Auth', 'Login, refresh tokens, and admin-only user registration')
-    .addTag('Users', 'User directory and profiles (admin)')
-    .addTag('Academic calendar', 'Academic years, terms, rollover, close')
-    .addTag('School structure', 'Grades, sections, subjects')
-    .addTag('Classes', 'Class offerings per year')
-    .addTag('Enrollments', 'Student enrollment')
-    .addTag('Parents', 'Parent–student links')
-    .addTag('Calendar', 'School / class events')
-    .addTag('Attendance', 'Sessions, marks, reports')
-    .addTag('Exams', 'Questions, exams, attempts, grading')
-    .addTag('Announcements', 'School announcements')
-    .addTag('Feedback', 'Feedback tickets')
-    .addTag('Notifications', 'In-app notifications')
-    .addTag('Chat', 'Conversations, messages, WebSocket')
-    .addTag('Dashboard', 'Role dashboards')
-    .addTag('Settings', 'User and school settings JSON')
-    .addTag('Files', 'Uploads and file metadata')
-    .addTag('Admin', 'Audit logs and admin utilities')
-    .addTag('AI', 'Mastery tracking (BKT), recommendations, learning paths, content generation, AI chat, analytics — proxied to trilink-ai-core')
-    .addTag('Gamification', 'Badges, points, exam leaderboard')
-    .addTag('Student goals', 'Personal learning goals')
-    .addTag('Student profiles', 'Extended student profile fields')
-    .addTag('Reports', 'Performance, weekly parent summary, period comparison')
-    .addTag('Analytics', 'Admin school-wide metrics')
-    .addTag('Grades', 'Teacher-managed grade entries: assignments, quizzes, exams (auto + manual)')
-    .addTag('Assignments', 'Teacher creates assignments; students submit files or text; teacher grades and releases')
-    .addTag('Integrations', 'External services and sync hints')
-    .addTag('Health', 'Liveness (no /api prefix)')
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig, {
-    extraModels: [],
-  });
-  SwaggerModule.setup('api-docs', app, document, {
-    swaggerOptions: {
-      persistAuthorization: true,
-      docExpansion: 'list',
-      filter: true,
-      showRequestDuration: true,
-    },
-    customSiteTitle: 'TriLink API Docs',
-  });
+  // Swagger only in development or when explicitly enabled (performance)
+  const enableSwagger = process.env.ENABLE_SWAGGER === 'true' || process.env.NODE_ENV !== 'production';
+  if (enableSwagger) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('TriLink API')
+      .setDescription(
+        'REST API for the TriLink school management platform. **Authentication:** use `POST /api/auth/login` to get tokens, then send `Authorization: Bearer <accessToken>` for protected routes. **Roles:** admin (full access, can register others), teacher, student, parent.',
+      )
+      .setVersion('1.0')
+      // Scheme name must match @ApiBearerAuth('JWT') on protected routes
+      .addBearerAuth(
+        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', description: 'Paste accessToken from login (no "Bearer " prefix needed in the box)' },
+        'JWT',
+      )
+      .addTag('Auth', 'Login, refresh tokens, and admin-only user registration')
+      .addTag('Users', 'User directory and profiles (admin)')
+      .addTag('Academic calendar', 'Academic years, terms, rollover, close')
+      .addTag('School structure', 'Grades, sections, subjects')
+      .addTag('Classes', 'Class offerings per year')
+      .addTag('Enrollments', 'Student enrollment')
+      .addTag('Parents', 'Parent–student links')
+      .addTag('Calendar', 'School / class events')
+      .addTag('Attendance', 'Sessions, marks, reports')
+      .addTag('Exams', 'Questions, exams, attempts, grading')
+      .addTag('Announcements', 'School announcements')
+      .addTag('Feedback', 'Feedback tickets')
+      .addTag('Notifications', 'In-app notifications')
+      .addTag('Chat', 'Conversations, messages, WebSocket')
+      .addTag('Dashboard', 'Role dashboards')
+      .addTag('Settings', 'User and school settings JSON')
+      .addTag('Files', 'Uploads and file metadata')
+      .addTag('Admin', 'Audit logs and admin utilities')
+      .addTag('AI', 'Mastery tracking (BKT), recommendations, learning paths, content generation, AI chat, analytics — proxied to trilink-ai-core')
+      .addTag('Gamification', 'Badges, points, exam leaderboard')
+      .addTag('Student goals', 'Personal learning goals')
+      .addTag('Student profiles', 'Extended student profile fields')
+      .addTag('Reports', 'Performance, weekly parent summary, period comparison')
+      .addTag('Analytics', 'Admin school-wide metrics')
+      .addTag('Grades', 'Teacher-managed grade entries: assignments, quizzes, exams (auto + manual)')
+      .addTag('Assignments', 'Teacher creates assignments; students submit files or text; teacher grades and releases')
+      .addTag('Integrations', 'External services and sync hints')
+      .addTag('Health', 'Liveness (no /api prefix)')
+      .build();
+    const document = SwaggerModule.createDocument(app, swaggerConfig, {
+      extraModels: [],
+    });
+    SwaggerModule.setup('api-docs', app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
+        docExpansion: 'list',
+        filter: true,
+        showRequestDuration: true,
+      },
+      customSiteTitle: 'TriLink API Docs',
+    });
+    console.log('Swagger API docs enabled at /api-docs');
+  }
 
   await app.listen(port, host);
   console.log(`TriLink API: http://localhost:${port}/${prefix}`);

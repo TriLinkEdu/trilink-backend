@@ -14,6 +14,11 @@ export type PostgresConnectionFields = {
   extra?: {
     connectionTimeoutMillis?: number;
     query_timeout?: number;
+    // Connection pooling for performance
+    max?: number;
+    min?: number;
+    idleTimeoutMillis?: number;
+    acquireTimeoutMillis?: number;
   };
 };
 
@@ -44,13 +49,18 @@ export function getPostgresConnectionFromEnv(opts?: { direct?: boolean }): Postg
   const rawUrl = directRawUrl || process.env.DATABASE_URL?.trim();
   const databaseUrl = useDatabaseUrl && rawUrl ? normalizePostgresUrl(rawUrl) : undefined;
   if (databaseUrl) {
-    return { 
+    return {
       url: databaseUrl,
       // Increase timeout for cloud databases
       connectTimeoutMS: 30000,
       extra: {
         connectionTimeoutMillis: 30000,
         query_timeout: 30000,
+        // Connection pooling - critical for performance
+        max: 20,
+        min: 5,
+        idleTimeoutMillis: 30000,
+        acquireTimeoutMillis: 60000,
       }
     };
   }
@@ -74,5 +84,12 @@ export function getPostgresConnectionFromEnv(opts?: { direct?: boolean }): Postg
     password: process.env.DB_PASSWORD || 'trilink_secret',
     database: process.env.DB_DATABASE || 'trilink',
     ...(ssl ? { ssl } : {}),
+    // Connection pooling
+    extra: {
+      max: 20,
+      min: 5,
+      idleTimeoutMillis: 30000,
+      acquireTimeoutMillis: 60000,
+    },
   };
 }
