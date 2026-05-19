@@ -26,6 +26,7 @@ class PatchUserDto {
   @ApiPropertyOptional() @IsOptional() @IsString() childName?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() relationship?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() profileImageFileId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() password?: string;
 }
 
 @ApiTags('Users')

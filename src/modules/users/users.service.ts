@@ -212,7 +212,7 @@ export class UsersService {
         | 'officeRoom'
         | 'childName'
       >
-    >,
+    > & { password?: string },
   ) {
     const u = await this.findById(id);
     if (!u) throw new NotFoundException('User not found');
@@ -240,6 +240,11 @@ export class UsersService {
       if (v !== undefined && v !== null) {
         (u as Record<(typeof keys)[number], unknown>)[key] = v;
       }
+    }
+
+    if (body.password) {
+      u.passwordHash = await bcrypt.hash(body.password, 10);
+      u.mustChangePassword = false;
     }
 
     const saved = await this.userRepo.save(u);
