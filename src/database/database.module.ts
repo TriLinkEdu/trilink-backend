@@ -37,6 +37,11 @@ import { SeedService } from './seed.service';
           type: 'postgres',
           ...pg,
           ...common,
+          // Enable query caching for frequently accessed static data
+          cache: {
+            type: 'database',
+            duration: 60000, // 1 minute cache for queries with cache: true
+          },
         };
       },
       inject: [ConfigService],

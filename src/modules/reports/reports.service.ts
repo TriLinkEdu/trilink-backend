@@ -441,11 +441,17 @@ export class ReportsService {
     const releasedExams = releasedExamIds.length ? await this.examRepo.find({ where: { id: In(releasedExamIds) } }) : [];
     const releasedExamMap = new Map(releasedExams.map((e) => [e.id, e]));
 
+    // Get student's grade for fallback
+    const studentGradeName = u.grade; // e.g., "Grade 9" or "9"
+
     const perCourse = offerings.map((co) => {
       const subject = subjectMap.get(co.subjectId);
       const grade = gradeMap.get(co.gradeId);
       const section = sectionMap.get(co.sectionId);
       const teacher = teacherMap.get(co.teacherId);
+
+      // Fallback to student's grade if grade lookup fails
+      const gradeName = grade?.name ?? studentGradeName ?? null;
 
       const courseMarks = markRows
         .filter((m) => sessionsById.get(m.sessionId)?.classOfferingId === co.id)
@@ -490,7 +496,7 @@ export class ReportsService {
         classOffering: {
           id: co.id,
           name: co.name,
-          grade: { id: grade?.id ?? co.gradeId, name: grade?.name ?? null },
+          grade: { id: grade?.id ?? co.gradeId, name: gradeName },
           section: { id: section?.id ?? co.sectionId, name: section?.name ?? null },
           subject: { id: subject?.id ?? co.subjectId, name: subject?.name ?? null, code: subject?.code ?? null },
           teacher: teacher
