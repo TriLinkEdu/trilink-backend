@@ -12,8 +12,12 @@ import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 @WebSocketGateway({
-  cors: { origin: '*' },
-  namespace: '/',
+  cors: { origin: '*', credentials: true },
+  namespace: '/events',
+  transports: ['websocket', 'polling'],
+  allowUpgrades: true,
+  pingInterval: 25000,
+  pingTimeout: 20000,
 })
 export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()

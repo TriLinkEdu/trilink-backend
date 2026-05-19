@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { RequestMethod, ValidationPipe, LogLevel } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -16,8 +17,9 @@ async function bootstrap() {
     AppModule,
     logLevels?.length ? { logger: logLevels } : undefined,
   );
+  app.useWebSocketAdapter(new IoAdapter(app));
   const config = app.get(ConfigService);
-  const port = config.get<number>('port') ?? 4000;
+  const port = parseInt(process.env.PORT || '4000', 10);
   const host = config.get<string>('host') || process.env.HOST || '0.0.0.0';
   const prefix = config.get<string>('apiPrefix') ?? 'api';
 

@@ -12,14 +12,20 @@ export const RedisClientProvider: Provider = {
     const disableRedis = ['true', '1', 'yes'].includes(
       (process.env.REDIS_DISABLED || '').toLowerCase(),
     );
-    if (disableRedis) {
-      // Return a no-op stub in environments without Redis (e.g., CI)
+
+    // Also skip Redis for localhost in production (won't work in Cloud Run)
+    const redisHost = process.env.REDIS_HOST;
+    const isLocalhost = !redisHost || ['localhost', '127.0.0.1', '::1'].includes(redisHost);
+    const skipRedis = disableRedis || isLocalhost;
+
+    if (skipRedis) {
+      // Return a no-op stub in environments without Redis (e.g., CI, Cloud Run)
       return createNoopRedisClient() as unknown as RedisClient;
     }
 
     const client = createClient({
       socket: {
-        host: process.env.REDIS_HOST || 'localhost',
+        host: redisHost,
         port: parseInt(process.env.REDIS_PORT || '6379', 10),
       },
     }) as RedisClient;

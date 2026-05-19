@@ -201,15 +201,15 @@ export class ChatController {
   }
 
   @Post('conversations/:id/members')
-  @ApiOperation({ summary: 'Add members to conversation (admin only)' })
+  @ApiOperation({ summary: 'Add members to conversation (conversation admin or system admin)' })
   @ApiParam({ name: 'id', description: 'Conversation UUID' })
   async addMembers(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddMembersDto,
     @CurrentUser() user: User,
   ) {
-    await this.chat.addMembers(id, user.id, dto.userIds);
-    return { ok: true };
+    await this.chat.addMembers(id, user.id, dto.userIds, user.role);
+    return { ok: true, added: dto.userIds.length };
   }
 
   @Delete('conversations/:id/members/:userId')
@@ -311,6 +311,18 @@ export class ChatController {
   @ApiOperation({ summary: 'Get read receipts for a message' })
   readReceipts(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
     return this.chat.getReadReceipts(id, user);
+  }
+
+  @Post('messages/:id/reactions')
+  @ApiOperation({ summary: 'Add reaction to a message' })
+  addReaction(@Param('id', ParseUUIDPipe) id: string, @Body() body: ReactionDto, @CurrentUser() user: User) {
+    return this.chat.addReaction(id, user.id, body.emoji);
+  }
+
+  @Delete('messages/:id/reactions/:emoji')
+  @ApiOperation({ summary: 'Remove reaction from a message' })
+  removeReaction(@Param('id', ParseUUIDPipe) id: string, @Param('emoji') emoji: string, @CurrentUser() user: User) {
+    return this.chat.removeReaction(id, user.id, decodeURIComponent(emoji));
   }
 
   @Get('users/search')

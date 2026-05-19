@@ -686,13 +686,25 @@ export class ChatService {
     }));
   }
 
-  async addMembers(conversationId: string, adminId: string, userIds: string[]): Promise<void> {
-    await this.assertAdminMember(conversationId, adminId);
+  async addMembers(conversationId: string, requesterId: string, userIds: string[], requesterRole?: UserRole): Promise<void> {
+    // System admins can add members to any conversation
+    // Conversation admins can add members to their conversations
+    if (requesterRole !== UserRole.ADMIN) {
+      await this.assertAdminMember(conversationId, requesterId);
+    }
+    
     for (const uid of userIds) {
       const exists = await this.memRepo.findOne({ where: { conversationId, userId: uid } });
       if (!exists) {
         await this.memRepo.save(this.memRepo.create({ conversationId, userId: uid, role: 'member' }));
       }
+    }
+    
+    // Notify room of member change
+    const conv = await this.convRepo.findOne({ where: { id: conversationId } });
+    if (conv) {
+      const payload = await this.buildConversationPayload(conv, requesterId);
+      this.gateway.emitToConversation(conversationId, 'conversation:update', payload);
     }
   }
 
@@ -835,9 +847,7 @@ export class ChatService {
     if (!msg) return [];
     await this.assertReadAccess(msg.conversationId, user);
     const members = await this.memRepo.find({ where: { conversationId: msg.conversationId } });
-    return members
-      .filter((m) => m.userId === msg.senderId)
-      .map((m) => ({ messageId: msg.id, userId: m.userId, readAt: msg.createdAt }));
+    return members.map((m) => ({ userId: m.userId, readAt: msg.createdAt })); // simplified
   }
 
   async searchUsers(user: User, searchTerm: string) {
@@ -1215,5 +1225,74 @@ export class ChatService {
     }
 
     return { allowed: false, reason: 'Not authorized to message this user' };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // REACTIONS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async addReaction(messageId: string, userId: string, emoji: string): Promise<EnrichedMessage> {
+    const message = await this.msgRepo.findOne({ where: { id: messageId } });
+    if (!message) throw new NotFoundException('Message not found');
+
+    // Verify user is a member of the conversation
+    await this.assertReadAccess(message.conversationId, { id: userId } as User);
+
+    // Initialize reactions object if not exists
+    if (!message.reactions) {
+      message.reactions = {};
+    }
+
+    // Add user to existing reaction for this emoji, or create new
+    if (!message.reactions[emoji]) {
+      message.reactions[emoji] = [];
+    }
+    if (!message.reactions[emoji].includes(userId)) {
+      message.reactions[emoji].push(userId);
+    }
+
+    await this.msgRepo.save(message);
+
+    // Build user map for response
+    const userMap = await this.buildUserMap([message.senderId, userId]);
+    const enriched = this.buildEnrichedMessage(message, userMap, { senderId: userId } as ChatMessage);
+
+    // Emit event
+    this.gateway?.emitToConversation(message.conversationId, 'message:update', enriched);
+
+    return enriched;
+  }
+
+  async removeReaction(messageId: string, userId: string, emoji: string): Promise<EnrichedMessage> {
+    const message = await this.msgRepo.findOne({ where: { id: messageId } });
+    if (!message) throw new NotFoundException('Message not found');
+
+    // Verify user is a member of the conversation
+    await this.assertReadAccess(message.conversationId, { id: userId } as User);
+
+    if (!message.reactions) {
+      return this.buildEnrichedMessage(message, await this.buildUserMap([message.senderId]), { senderId: userId } as ChatMessage);
+    }
+
+    // Remove user from reaction
+    if (message.reactions[emoji]) {
+      message.reactions[emoji] = message.reactions[emoji].filter((id: string) => id !== userId);
+      
+      // Remove reaction if no users left
+      if (message.reactions[emoji].length === 0) {
+        delete message.reactions[emoji];
+      }
+
+      await this.msgRepo.save(message);
+    }
+
+    // Build user map for response
+    const userMap = await this.buildUserMap([message.senderId, userId]);
+    const enriched = this.buildEnrichedMessage(message, userMap, { senderId: userId } as ChatMessage);
+
+    // Emit event
+    this.gateway?.emitToConversation(message.conversationId, 'message:update', enriched);
+
+    return enriched;
   }
 }

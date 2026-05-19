@@ -25,7 +25,8 @@ COPY --from=builder /app/dist ./dist
 
 RUN mkdir -p /app/uploads && chown -R node:node /app
 
-EXPOSE 4000
+ENV PORT=8080
+EXPOSE 8080
 
 USER node
 

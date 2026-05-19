@@ -29,6 +29,10 @@ interface AuthenticatedSocket extends Socket {
     credentials: true,
   },
   namespace: '/',
+  transports: ['websocket', 'polling'],
+  allowUpgrades: true,
+  pingInterval: 25000,
+  pingTimeout: 20000,
 })
 export class ChatGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
@@ -54,22 +58,28 @@ export class ChatGateway
 
   async handleConnection(client: AuthenticatedSocket) {
     try {
-      const token =
-        (client.handshake.auth?.token as string) ||
-        (client.handshake.query?.token as string);
-
+      // 1) Token verification
+      const token = client.handshake.auth?.token || client.handshake.query?.token;
       if (!token) {
-        this.logger.debug(`[${client.id}] No token — disconnecting`);
+        this.logger.warn('Socket connection rejected: no token');
         client.disconnect();
         return;
       }
 
-      const payload = this.jwtService.verify<{ sub?: string; type?: string }>(token, {
-        secret: this.config.get<string>('jwt.secret'),
-      });
+      // 2) Verify JWT
+      let payload: { sub?: string; type?: string };
+      try {
+        payload = this.jwtService.verify(token, {
+          secret: this.config.get('jwt.secret'),
+        });
+      } catch {
+        this.logger.warn('Socket connection rejected: invalid token');
+        client.disconnect();
+        return;
+      }
 
       if (payload.type !== 'access' || !payload.sub) {
-        this.logger.debug(`[${client.id}] Invalid token type — disconnecting`);
+        this.logger.warn('Socket connection rejected: token type invalid');
         client.disconnect();
         return;
       }
@@ -77,30 +87,33 @@ export class ChatGateway
       const userId = payload.sub;
       client.data.userId = userId;
 
-      // Join personal room
+      // 3) Join personal room
       await client.join(`user:${userId}`);
 
-      // Join all conversation rooms
-      const convIds = await this.chatService.getUserConversationIds(userId);
-      for (const cid of convIds) {
-        await client.join(`conversation:${cid}`);
+      // 4) Join conversation rooms (non-fatal)
+      try {
+        const convIds = await this.chatService.getUserConversationIds(userId);
+        for (const cid of convIds) {
+          await client.join(`conversation:${cid}`);
+        }
+
+        // 5) Mark online and broadcast
+        await this.chatService.setOnline(userId, true);
+        for (const cid of convIds) {
+          this.server.to(`conversation:${cid}`).emit('presence:update', {
+            userId,
+            isOnline: true,
+            lastSeenAt: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        this.logger.warn(`Room join failed for ${userId}: ${err.message}`);
+        // Don't disconnect - client is authenticated, rooms will be joined via conversation:join events
       }
 
-      // Mark online
-      await this.chatService.setOnline(userId, true);
-
-      // Broadcast presence:update online to all conversation rooms
-      for (const cid of convIds) {
-        this.server.to(`conversation:${cid}`).emit('presence:update', {
-          userId,
-          isOnline: true,
-          lastSeenAt: new Date().toISOString(),
-        });
-      }
-
-      this.logger.debug(`[${client.id}] User ${userId} connected, joined ${convIds.length} rooms`);
+      this.logger.log(`Socket connected: user ${userId}`);
     } catch (err) {
-      this.logger.error(`[${client.id}] Connection error: ${err.message}`);
+      this.logger.error('Socket connection error:', err.message);
       client.disconnect();
     }
   }
