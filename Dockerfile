@@ -1,16 +1,13 @@
-FROM node:22-bookworm-slim AS builder
+FROM node:22-bookworm AS builder
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-# Copy pre-installed node_modules from host if present, otherwise install
-COPY node_modules* ./node_modules/
-RUN if [ ! -d "node_modules/.bin" ]; then \
-      npm config set fetch-retry-mintimeout 20000 && \
-      npm config set fetch-retry-maxtimeout 120000 && \
-      npm config set fetch-retries 5 && \
-      npm ci; \
-    fi
+# Always install dependencies to ensure completeness
+RUN npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm config set fetch-retries 5 && \
+    npm ci
 
 COPY . .
 RUN npm run build
