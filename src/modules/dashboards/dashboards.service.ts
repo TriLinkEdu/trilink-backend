@@ -293,6 +293,11 @@ export class DashboardsService {
       where: { studentId: userId, submittedAt: Not(IsNull()) },
     });
 
+    const recentAnnouncements = await this.announcements.find({
+      order: { createdAt: 'DESC' },
+      take: 5,
+    });
+
     return {
       activeEnrollments: myEnrollments,
       unreadNotifications: unread,
@@ -306,6 +311,7 @@ export class DashboardsService {
         classOfferingId: e.classOfferingId,
       })),
       recentNotifications,
+      recentAnnouncements,
       testsTaken,
     };
   }
