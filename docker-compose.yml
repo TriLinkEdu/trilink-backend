@@ -1,6 +1,5 @@
-# `docker compose up --build` → Postgres + Nest API + Next web (if ../triLink-web/web exists).
-# Backend only (no sibling web repo): `docker compose up --build db api`
-# Web: http://localhost:3000 — browser calls API at http://localhost:4000 (published from `api`).
+# `docker compose up --build` → Postgres + Nest API only
+# Web frontend runs separately from triLink-web/web folder
 #
 # Neon / external Postgres: set DATABASE_URL in `.env` (see .env.example). Start API without local db:
 #   docker compose up -d --build --no-deps api
@@ -83,23 +82,6 @@ services:
       redis:
         condition: service_healthy
     command: npm run seed:prod
-    networks:
-      - trilink
-
-  # Next.js — context: sibling folder ../triLink-web/web (see comment above)
-  web:
-    build:
-      context: ../triLink-web/web
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
-    restart: unless-stopped
-    ports:
-      - "3000:8080"  # Cloud Run uses 8080 internally
-    environment:
-      - PORT=8080
-    depends_on:
-      - api
     networks:
       - trilink
 

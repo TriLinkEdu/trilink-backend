@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -179,17 +180,22 @@ export class ReportCardsService {
   // ─── Full report card ─────────────────────────────────────────────────────
 
   async getStudentTermReportCard(studentId: string, termId: string, viewer: User) {
+    if (!studentId || !termId) {
+      throw new BadRequestException('Student ID and Term ID are required');
+    }
+
     await this.assertCanViewStudent(viewer, studentId);
 
-    // 1. Load term → get academicYearId and date range
+    const student = await this.userRepo.findOne({ where: { id: studentId }, relations: ['profile'] });
+    if (!student) throw new NotFoundException('Student not found');
+
     const term = await this.termRepo.findOne({ where: { id: termId } });
     if (!term) throw new NotFoundException('Term not found');
 
+    if (!term.academicYearId) throw new NotFoundException('Term has no academic year');
+
     const academicYear = await this.yearRepo.findOne({ where: { id: term.academicYearId } });
     if (!academicYear) throw new NotFoundException('Academic year not found');
-
-    const student = await this.userRepo.findOne({ where: { id: studentId } });
-    if (!student) throw new NotFoundException('Student not found');
 
     // 2. Find all enrollments for student in that academic year
     const enrollments = await this.enrollmentRepo.find({
@@ -213,9 +219,11 @@ export class ReportCardsService {
       const teacher = await this.userRepo.findOne({ where: { id: co.teacherId } });
       subjectData.push({
         classOfferingId: coId,
-        subjectId: co.subjectId,
+        subjectId: co.subjectId ?? '',
         subjectName: subject?.name ?? 'Unknown Subject',
-        teacherName: teacher ? `${teacher.firstName} ${teacher.lastName}` : 'Unknown Teacher',
+        teacherName: teacher?.firstName || teacher?.lastName 
+          ? `${teacher.firstName ?? ''} ${teacher.lastName ?? ''}`.trim() 
+          : 'Unknown Teacher',
       });
     }
 
