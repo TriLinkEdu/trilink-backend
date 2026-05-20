@@ -184,18 +184,21 @@ export class ReportCardsService {
       throw new BadRequestException('Student ID and Term ID are required');
     }
 
-    await this.assertCanViewStudent(viewer, studentId);
+    try {
+      await this.assertCanViewStudent(viewer, studentId);
 
-    const student = await this.userRepo.findOne({ where: { id: studentId }, relations: ['profile'] });
-    if (!student) throw new NotFoundException('Student not found');
+      const student = await this.userRepo.findOne({ where: { id: studentId }, relations: ['profile'] });
+      if (!student) throw new NotFoundException('Student not found');
 
-    const term = await this.termRepo.findOne({ where: { id: termId } });
-    if (!term) throw new NotFoundException('Term not found');
+      const term = await this.termRepo.findOne({ where: { id: termId } });
+      if (!term) throw new NotFoundException('Term not found');
 
-    if (!term.academicYearId) throw new NotFoundException('Term has no academic year');
+      if (!term.academicYearId) {
+        throw new NotFoundException(`Term ${termId} has no academic year assigned`);
+      }
 
-    const academicYear = await this.yearRepo.findOne({ where: { id: term.academicYearId } });
-    if (!academicYear) throw new NotFoundException('Academic year not found');
+      const academicYear = await this.yearRepo.findOne({ where: { id: term.academicYearId } });
+      if (!academicYear) throw new NotFoundException('Academic year not found');
 
     // 2. Find all enrollments for student in that academic year
     const enrollments = await this.enrollmentRepo.find({
@@ -334,6 +337,13 @@ export class ReportCardsService {
         : null,
       generatedAt: new Date().toISOString(),
     };
+    } catch (error) {
+      console.error('Error in getStudentTermReportCard:', error);
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new Error(`Failed to generate report card: ${error.message}`);
+    }
   }
 
   // ─── Class report card summary ────────────────────────────────────────────

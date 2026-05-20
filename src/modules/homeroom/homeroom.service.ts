@@ -85,9 +85,16 @@ export class HomeroomService {
       profileImageFileId: string | null;
     }>;
   }> {
-    // Find the active academic year
-    const activeYear = await this.yearRepo.findOne({ where: { isActive: true } });
-    if (!activeYear) throw new NotFoundException('No active academic year found');
+    console.log(`[Homeroom] getMyClass called for teacher: ${teacherId}`);
+    
+    try {
+      // Find the active academic year
+      const activeYear = await this.yearRepo.findOne({ where: { isActive: true } });
+      if (!activeYear) {
+        console.log(`[Homeroom] No active academic year found`);
+        throw new NotFoundException('No active academic year found');
+      }
+      console.log(`[Homeroom] Active year: ${activeYear.id}`);
 
     // Find the homeroom assignment for this teacher in the active year
     const assignment = await this.homeroomRepo.findOne({
@@ -141,6 +148,10 @@ export class HomeroomService {
         profileImageFileId: s.profileImageFileId,
       })),
     };
+    } catch (error) {
+      console.error(`[Homeroom] Error in getMyClass for teacher ${teacherId}:`, error);
+      throw error;
+    }
   }
 
   /**
