@@ -86,6 +86,8 @@ export interface EnrichedConversation {
   parentVisible: boolean;
   createdAt: string;
   updatedAt: string;
+  blockedByMe?: boolean;
+  blockedMe?: boolean;
 }
 
 export interface MediaGallery {
@@ -285,6 +287,23 @@ export class ChatService {
       lastMessageSenderName = `${s.firstName} ${s.lastName}`;
     }
 
+    let blockedByMe = false;
+    let blockedMe = false;
+
+    if (conv.type === 'direct') {
+      const otherUserId = allUserIds.find((id) => id !== userId);
+      if (otherUserId) {
+        const blocks = await this.blockRepo.find({
+          where: [
+            { blockerId: userId, blockedId: otherUserId },
+            { blockerId: otherUserId, blockedId: userId },
+          ],
+        });
+        blockedByMe = blocks.some((b) => b.blockerId === userId && b.blockedId === otherUserId);
+        blockedMe = blocks.some((b) => b.blockerId === otherUserId && b.blockedId === userId);
+      }
+    }
+
     return {
       id: conv.id,
       type: conv.type,
@@ -304,6 +323,8 @@ export class ChatService {
       parentVisible: conv.parentVisible,
       createdAt: conv.createdAt.toISOString(),
       updatedAt: conv.updatedAt.toISOString(),
+      blockedByMe,
+      blockedMe,
     };
   }
 
