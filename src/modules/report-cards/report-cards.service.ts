@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -339,10 +340,10 @@ export class ReportCardsService {
     };
     } catch (error) {
       console.error('Error in getStudentTermReportCard:', error);
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+      if (error instanceof HttpException) {
         throw error;
       }
-      throw new Error(`Failed to generate report card: ${error.message}`);
+      throw error;
     }
   }
 
