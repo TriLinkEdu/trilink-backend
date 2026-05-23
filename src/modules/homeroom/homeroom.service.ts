@@ -277,8 +277,8 @@ export class HomeroomService {
     const coIds = classOfferings.map((co) => co.id);
     const enrollment = await this.enrollmentRepo
       .createQueryBuilder('e')
-      .where('e.student_id = :studentId', { studentId })
-      .andWhere('e.class_offering_id IN (:...ids)', { ids: coIds })
+      .where('e.studentId = :studentId', { studentId })
+      .andWhere('e.classOfferingId IN (:...ids)', { ids: coIds })
       .getOne();
 
     return !!enrollment;
