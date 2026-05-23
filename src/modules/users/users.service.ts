@@ -162,7 +162,7 @@ export class UsersService {
   async toPublicWithImage(u: User) {
     return {
       ...this.toPublic(u),
-      profileImagePath: null,
+      profileImagePath: u.profileImageFileId ? `/files/${u.profileImageFileId}/download` : null,
     };
   }
 

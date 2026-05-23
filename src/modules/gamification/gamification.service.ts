@@ -518,20 +518,22 @@ export class GamificationService implements OnModuleInit {
     };
   }
 
+  /**
+   * Provide a small summary of progress toward the next badge.
+   * This is a lightweight helper used by the GamificationHub.
+   */
   async nextBadgeProgressForUser(userId: string) {
-    const [points, badges, earnedBadges] = await Promise.all([
+    const [pointsRes, badges, earned] = await Promise.all([
       this.totalBadgePoints(userId),
       this.listBadges(),
       this.listUserBadges(userId),
     ]);
 
-    const earnedBadgeIds = new Set(earnedBadges.map((badge) => badge.badgeId));
-    const nextBadge = badges
-      .filter((badge) => !earnedBadgeIds.has(badge.id))
-      .sort((left, right) => left.pointsValue - right.pointsValue)[0] ?? null;
+    const currentPoints = pointsRes.totalBadgePoints ?? 0;
+    const earnedIds = new Set(earned.map((b) => b.badgeId));
+    const nextBadge = badges.filter((b) => !earnedIds.has(b.id)).sort((a, z) => a.pointsValue - z.pointsValue)[0] ?? null;
 
-    const currentPoints = points.totalBadgePoints ?? 0;
-    const pointsToNextBadge = nextBadge ? Math.max(nextBadge.pointsValue - currentPoints, 0) : 0;
+    const pointsToNext = nextBadge ? Math.max(nextBadge.pointsValue - currentPoints, 0) : 0;
     const progressPercent = nextBadge && nextBadge.pointsValue > 0
       ? Math.min(100, Math.round((currentPoints / nextBadge.pointsValue) * 100))
       : 100;
@@ -540,7 +542,7 @@ export class GamificationService implements OnModuleInit {
       userId,
       totalBadgePoints: currentPoints,
       nextBadge,
-      pointsToNextBadge,
+      pointsToNextBadge: pointsToNext,
       progressPercent,
     };
   }

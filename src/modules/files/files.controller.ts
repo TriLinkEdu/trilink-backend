@@ -8,6 +8,7 @@ import {
   UseGuards,
   UseInterceptors,
   Res,
+  Req,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -71,8 +72,21 @@ export class FilesController {
   @Public()
   @Get(':id/download')
   @ApiOperation({ summary: 'Download file content (authenticated)' })
-  async download(@Param('id', ParseUUIDPipe) id: string, @Res() res: Response) {
+  async download(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
+    @Req() req: Request,
+  ) {
     const rec = await this.files.getOrThrow(id);
-    return res.redirect(rec.path);
+    let targetPath = rec.path;
+    if (targetPath.includes('localhost') || targetPath.includes('127.0.0.1')) {
+      const host = req.headers.host;
+      if (host) {
+        targetPath = targetPath
+          .replace(/http:\/\/localhost:\d+/, `http://${host}`)
+          .replace(/http:\/\/127.0.0.1:\d+/, `http://${host}`);
+      }
+    }
+    return res.redirect(targetPath);
   }
 }
