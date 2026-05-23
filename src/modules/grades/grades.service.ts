@@ -37,16 +37,32 @@ export class GradesService {
 
   private async assertTeacherOwnsClass(viewer: User, classOfferingId: string) {
     if (viewer.role === UserRole.ADMIN) return;
-    const co = await this.coRepo.findOne({ where: { id: classOfferingId } });
+    
+    // Ensure classOfferingId is a string if it's passed as an object/relation
+    const targetId = typeof classOfferingId === 'object' && classOfferingId !== null
+      ? (classOfferingId as any).id
+      : classOfferingId;
+
+    const co = await this.coRepo.findOne({ where: { id: targetId } });
     if (!co) throw new NotFoundException('Class offering not found');
-    // If class has no teacher assigned, allow any teacher (entries may have been created before assignment)
-    if (!co.teacherId) return;
-    if (co.teacherId !== viewer.id) {
-      this.logger.warn(
-        `Forbidden: viewer ${viewer.id} (role=${viewer.role}) tried to access class ${classOfferingId} owned by teacher ${co.teacherId}`,
-      );
-      throw new ForbiddenException('You do not teach this class');
+    const vId = String(viewer.id).toLowerCase();
+    const tId = co.teacherId ? String(co.teacherId).toLowerCase() : null;
+
+    this.logger.debug(`assertTeacherOwnsClass: classId=${targetId}, ownerId=${tId}, viewerId=${vId}`);
+
+    // If no teacher is assigned to the class, we allow any teacher to manage it for now
+    if (!tId) {
+      this.logger.debug(`assertTeacherOwnsClass: allowing because no teacherId on class`);
+      return;
     }
+    
+    if (tId === vId) {
+      this.logger.debug(`assertTeacherOwnsClass: allowing because viewer is the owner`);
+      return;
+    }
+
+    this.logger.warn(`Forbidden: viewer ${vId} role ${viewer.role} tried to access class ${targetId} owned by ${tId}`);
+    throw new ForbiddenException('You do not teach this class');
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -177,27 +193,57 @@ export class GradesService {
   ) {
     const entry = await this.repo.findOne({ where: { id } });
     if (!entry) throw new NotFoundException('Grade entry not found');
-    this.logger.debug(
-      `updateEntry: viewer=${viewer.id} (role=${viewer.role}), entry.id=${entry.id}, entry.teacherId=${entry.teacherId}, entry.classOfferingId=${entry.classOfferingId}`,
-    );
-    console.log(`[DEBUG] updateEntry invoked by viewer: ${viewer.id}, role: ${viewer.role}`);
+    // Allow admin; allow the teacher who created the entry; OR the teacher who owns the class
+    if (viewer.role === UserRole.ADMIN) {
+      // Admin is always allowed
+    } else if (viewer.role === UserRole.TEACHER) {
+      const vId = String(viewer.id).toLowerCase();
+      const creatorId = entry.teacherId ? String(entry.teacherId).toLowerCase() : null;
 
-    // Allow admin; allow any teacher to edit existing entries
-    if (viewer.role !== UserRole.ADMIN && viewer.role !== UserRole.TEACHER) {
-      console.log(`[DEBUG] updateEntry throwing Forbidden: role ${viewer.role} is not admin or teacher`);
+      // If the teacher created the entry, they can always edit it
+      if (creatorId === vId) {
+        this.logger.debug(`updateEntry: allowing because viewer ${vId} is the creator`);
+      } else {
+        // Otherwise, they must be the current teacher of the class
+        this.logger.debug(`updateEntry: viewer ${vId} is not the creator (${creatorId}), checking class ownership...`);
+        await this.assertTeacherOwnsClass(viewer, entry.classOfferingId);
+      }
+    } else {
       throw new ForbiddenException('Only admin or teacher can update grades');
     }
-    
-    console.log(`[DEBUG] updateEntry calling assertTeacherOwnsClass for class ${entry.classOfferingId}`);
-    try {
-      await this.assertTeacherOwnsClass(viewer, entry.classOfferingId);
-      console.log(`[DEBUG] updateEntry assertTeacherOwnsClass passed`);
-    } catch (err) {
-      console.log(`[DEBUG] updateEntry assertTeacherOwnsClass threw error:`, err.message);
-      throw err;
-    }
+
     Object.assign(entry, body);
     return this.repo.save(entry);
+  }
+
+  /**
+   * Delete a single grade entry.
+   */
+  async deleteEntry(id: string, viewer: User) {
+    const entry = await this.repo.findOne({ where: { id } });
+    if (!entry) throw new NotFoundException('Grade entry not found');
+
+    // Allow admin; allow the teacher who created the entry; OR the teacher who owns the class
+    if (viewer.role === UserRole.ADMIN) {
+      // Admin is always allowed
+    } else if (viewer.role === UserRole.TEACHER) {
+      const vId = String(viewer.id).toLowerCase();
+      const creatorId = entry.teacherId ? String(entry.teacherId).toLowerCase() : null;
+
+      // If the teacher created the entry, they can always delete it
+      if (creatorId === vId) {
+        this.logger.debug(`deleteEntry: allowing because viewer ${vId} is the creator`);
+      } else {
+        // Otherwise, they must be the current teacher of the class
+        this.logger.debug(`deleteEntry: viewer ${vId} is not the creator (${creatorId}), checking class ownership...`);
+        await this.assertTeacherOwnsClass(viewer, entry.classOfferingId);
+      }
+    } else {
+      throw new ForbiddenException('Only admin or teacher can delete grades');
+    }
+
+    await this.repo.remove(entry);
+    return { success: true };
   }
 
   /**
@@ -244,11 +290,14 @@ export class GradesService {
    * Delete an entire assessment (all entries with the given classOfferingId + title).
    */
   async deleteGroup(filter: { classOfferingId: string; title: string }, viewer: User) {
-    // Allow admin or any teacher to delete existing assessments
+    // Allow admin; allow the teacher who owns the class
     if (viewer.role !== UserRole.ADMIN && viewer.role !== UserRole.TEACHER) {
       throw new ForbiddenException('Only admin or teacher can delete assessments');
     }
-    await this.assertTeacherOwnsClass(viewer, filter.classOfferingId);
+
+    if (viewer.role === UserRole.TEACHER) {
+      await this.assertTeacherOwnsClass(viewer, filter.classOfferingId);
+    }
     const entries = await this.repo.find({
       where: { classOfferingId: filter.classOfferingId, title: filter.title },
     });

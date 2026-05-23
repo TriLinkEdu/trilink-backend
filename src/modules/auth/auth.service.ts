@@ -44,13 +44,22 @@ export class AuthService {
 
   async login(dto: LoginDto): Promise<TokenResponse> {
     const user = await this.usersService.findByEmail(dto.email);
-    if (!user) throw new UnauthorizedException('Invalid email or password');
+    if (!user) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
 
-    const roleMatch = dto.role.toLowerCase() === user.role;
-    if (!roleMatch) throw new UnauthorizedException('Invalid email or password');
+    const portalRole = String(dto.role).toLowerCase();
+    const accountRole = String(user.role).toLowerCase();
+    const roleMatch = portalRole === accountRole;
+
+    if (!roleMatch) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
 
     const valid = await this.usersService.validatePassword(user, dto.password);
-    if (!valid) throw new UnauthorizedException('Invalid email or password');
+    if (!valid) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
 
     const res = await this.buildTokenResponse(user);
     void this.safeAudit(

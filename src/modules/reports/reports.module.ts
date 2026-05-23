@@ -11,6 +11,7 @@ import { ClassOffering } from '../class-offerings/entities/class-offering.entity
 import { Subject } from '../school-structure/entities/subject.entity';
 import { Grade } from '../school-structure/entities/grade.entity';
 import { Section } from '../school-structure/entities/section.entity';
+import { GradeEntry } from '../grades/entities/grade-entry.entity';
 import { ReportsService } from './reports.service';
 import { ReportsController } from './reports.controller';
 
@@ -28,6 +29,7 @@ import { ReportsController } from './reports.controller';
       Subject,
       Grade,
       Section,
+      GradeEntry,
     ]),
   ],
   controllers: [ReportsController],

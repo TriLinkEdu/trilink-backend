@@ -115,7 +115,7 @@ export class AttendanceService {
     const offeringIds = offerings.map((o) => o.id);
     const sessions = await this.sessRepo
       .createQueryBuilder('s')
-      .where('s.class_offering_id IN (:...ids)', { ids: offeringIds })
+      .where('s.classOfferingId IN (:...ids)', { ids: offeringIds })
       .orderBy('s.date', 'DESC')
       .getMany();
 

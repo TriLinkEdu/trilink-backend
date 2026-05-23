@@ -31,8 +31,8 @@ export class NotificationsService {
   }
 
   listForUser(userId: string, unreadOnly?: boolean) {
-    const qb = this.repo.createQueryBuilder('n').where('n.user_id = :uid', { uid: userId }).orderBy('n.created_at', 'DESC');
-    if (unreadOnly) qb.andWhere('n.read_at IS NULL');
+    const qb = this.repo.createQueryBuilder('n').where('n.userId = :uid', { uid: userId }).orderBy('n.createdAt', 'DESC');
+    if (unreadOnly) qb.andWhere('n.readAt IS NULL');
     return qb.getMany();
   }
 
