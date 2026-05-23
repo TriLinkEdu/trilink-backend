@@ -77,14 +77,6 @@ export class HomeroomService {
       return this.homeroomRepo.save(existing);
     }
 
-    // Prevent a teacher from being assigned to multiple homerooms in the same academic year
-    const teacherAlreadyAssigned = await this.homeroomRepo.findOne({
-      where: { teacherId: dto.teacherId, academicYearId: dto.academicYearId },
-    });
-    if (teacherAlreadyAssigned) {
-      throw new BadRequestException('This teacher is already assigned as a homeroom teacher for another class in this academic year');
-    }
-
     return this.homeroomRepo.save(
       this.homeroomRepo.create({
         teacherId: dto.teacherId,
