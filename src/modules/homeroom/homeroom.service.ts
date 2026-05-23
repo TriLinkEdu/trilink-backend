@@ -138,8 +138,8 @@ export class HomeroomService {
     // Find all enrollments for those class offerings
     const enrollments = await this.enrollmentRepo
       .createQueryBuilder('e')
-      .where('e.classOfferingId IN (:...ids)', { ids: classOfferingIds })
-      .andWhere('e.academicYearId = :yearId', { yearId: activeYear.id })
+      .where('e.class_offering_id IN (:...ids)', { ids: classOfferingIds })
+      .andWhere('e.academic_year_id = :yearId', { yearId: activeYear.id })
       .getMany();
 
     // Deduplicate by studentId
