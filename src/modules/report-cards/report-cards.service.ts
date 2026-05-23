@@ -139,8 +139,8 @@ export class ReportCardsService {
     const coIds = classOfferings.map((co) => co.id);
     const enrollment = await this.enrollmentRepo
       .createQueryBuilder('e')
-      .where('e.student_id = :studentId', { studentId })
-      .andWhere('e.class_offering_id IN (:...ids)', { ids: coIds })
+      .where('e.studentId = :studentId', { studentId })
+      .andWhere('e.classOfferingId IN (:...ids)', { ids: coIds })
       .getOne();
 
     if (!enrollment) {
@@ -391,8 +391,8 @@ export class ReportCardsService {
     // Find all unique students enrolled
     const enrollments = await this.enrollmentRepo
       .createQueryBuilder('e')
-      .where('e.class_offering_id IN (:...ids)', { ids: coIds })
-      .andWhere('e.academic_year_id = :yearId', { yearId: term.academicYearId })
+      .where('e.classOfferingId IN (:...ids)', { ids: coIds })
+      .andWhere('e.academicYearId = :yearId', { yearId: term.academicYearId })
       .getMany();
 
     const studentIds = [...new Set(enrollments.map((e) => e.studentId))];
@@ -593,12 +593,12 @@ export class ReportCardsService {
     // Entries without termId but created within the term's date range
     const byDateRange = await this.gradeEntryRepo
       .createQueryBuilder('ge')
-      .where('ge.student_id = :studentId', { studentId })
-      .andWhere('ge.class_offering_id = :classOfferingId', { classOfferingId })
-      .andWhere('ge.term_id IS NULL')
-      .andWhere('ge.created_at >= :start', { start: termStartDate + 'T00:00:00.000Z' })
-      .andWhere('ge.created_at <= :end', { end: termEndDate + 'T23:59:59.999Z' })
-      .andWhere('ge.released_at IS NOT NULL')
+      .where('ge.studentId = :studentId', { studentId })
+      .andWhere('ge.classOfferingId = :classOfferingId', { classOfferingId })
+      .andWhere('ge.termId IS NULL')
+      .andWhere('ge.createdAt >= :start', { start: termStartDate + 'T00:00:00.000Z' })
+      .andWhere('ge.createdAt <= :end', { end: termEndDate + 'T23:59:59.999Z' })
+      .andWhere('ge.releasedAt IS NOT NULL')
       .getMany();
 
     // Merge, deduplicate by id
@@ -635,15 +635,15 @@ export class ReportCardsService {
     // Sessions tagged with this termId
     const sessionsByTermId = await this.sessionRepo
       .createQueryBuilder('s')
-      .where('s.class_offering_id IN (:...ids)', { ids: classOfferingIds })
-      .andWhere('s.term_id = :termId', { termId })
+      .where('s.classOfferingId IN (:...ids)', { ids: classOfferingIds })
+      .andWhere('s.termId = :termId', { termId })
       .getMany();
 
     // Sessions without termId but within date range
     const sessionsByDate = await this.sessionRepo
       .createQueryBuilder('s')
-      .where('s.class_offering_id IN (:...ids)', { ids: classOfferingIds })
-      .andWhere('s.term_id IS NULL')
+      .where('s.classOfferingId IN (:...ids)', { ids: classOfferingIds })
+      .andWhere('s.termId IS NULL')
       .andWhere('s.date >= :start', { start: termStartDate })
       .andWhere('s.date <= :end', { end: termEndDate })
       .getMany();
@@ -664,8 +664,8 @@ export class ReportCardsService {
     const sessionIds = sessions.map((s) => s.id);
     const marks = await this.markRepo
       .createQueryBuilder('m')
-      .where('m.session_id IN (:...ids)', { ids: sessionIds })
-      .andWhere('m.student_id = :studentId', { studentId })
+      .where('m.sessionId IN (:...ids)', { ids: sessionIds })
+      .andWhere('m.studentId = :studentId', { studentId })
       .getMany();
 
     const present = marks.filter((m) => m.status === 'present').length;
