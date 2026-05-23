@@ -8,6 +8,8 @@ import {
   Post,
   Query,
   UseGuards,
+  InternalServerErrorException,
+  BadRequestException
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -42,8 +44,13 @@ export class HomeroomController {
   })
   @ApiBody({ type: AssignHomeroomDto })
   @ApiResponse({ status: 201, description: 'Assignment created or updated' })
-  assign(@Body() dto: AssignHomeroomDto) {
-    return this.svc.assign(dto);
+  async assign(@Body() dto: AssignHomeroomDto) {
+    try {
+      return await this.svc.assign(dto);
+    } catch (e) {
+      if (e instanceof BadRequestException) throw e;
+      throw new InternalServerErrorException(e.message + '\n' + e.stack);
+    }
   }
 
   @Get('my-class')

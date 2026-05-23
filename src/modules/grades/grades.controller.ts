@@ -84,8 +84,8 @@ class ReleaseDto {
   @ApiProperty({ description: 'Title of the grade entry to release (releases all students for this title)' }) @IsString() title: string;
 }
 
-@ApiTags('Grades')
-@Controller('grades')
+@ApiTags('Grades (Scores)')
+@Controller('grade-entries')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth('JWT')
 export class GradesController {

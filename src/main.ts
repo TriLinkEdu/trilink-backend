@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
   const logLevelEnv = (process.env.NEST_LOG_LEVEL || process.env.LOG_LEVEL || '').trim();
@@ -34,6 +35,7 @@ async function bootstrap() {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
+  app.useGlobalFilters(new AllExceptionsFilter());
   const corsList = config.get<string[] | null>('corsOrigin');
   if (corsList?.length) {
     const normalizedAllowed = new Set(

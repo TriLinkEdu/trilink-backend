@@ -13,9 +13,11 @@ import { ExamQuestion } from './entities/exam-question.entity';
 import { ExamAttempt } from './entities/exam-attempt.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ParentStudent } from '../parent-students/entities/parent-student.entity';
+import { GradeEntry, GradeEntryType } from '../grades/entities/grade-entry.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { GamificationService } from '../gamification/gamification.service';
 import { Enrollment } from '../enrollments/entities/enrollment.entity';
+import { ClassOfferingsService } from '../class-offerings/class-offerings.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { ClassOffering } from '../class-offerings/entities/class-offering.entity';
 import { Grade } from '../school-structure/entities/grade.entity';
@@ -30,13 +32,13 @@ export type ExamCreateInput = {
   title: string;
   academicYearId: string;
   classOfferingId: string | null;
-  termId?: string | null;
   opensAt: Date;
   closesAt: Date;
   durationMinutes: number;
   minStayMinutes?: number;
   createdById: string;
   maxPoints?: number;
+  termId?: string | null;
 };
 
 @Injectable()
@@ -51,12 +53,10 @@ export class ExamsService {
     @InjectRepository(Enrollment) private readonly enrollmentRepo: Repository<Enrollment>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
-    @InjectRepository(ClassOffering) private readonly coRepo: Repository<ClassOffering>,
-    @InjectRepository(Grade) private readonly gradeRepo: Repository<Grade>,
-    @InjectRepository(Section) private readonly sectionRepo: Repository<Section>,
-    @InjectRepository(Subject) private readonly subjectRepo: Repository<Subject>,
+    @InjectRepository(GradeEntry) private readonly gradeEntryRepo: Repository<GradeEntry>,
     private readonly notifications: NotificationsService,
     private readonly gamification: GamificationService,
+    private readonly classOfferings: ClassOfferingsService,
     private readonly events: EventsGateway,
     private readonly gradesService: GradesService,
     private readonly http: HttpService,
@@ -114,42 +114,113 @@ export class ExamsService {
 
   private norm(s: unknown): string {
     if (s === undefined || s === null) return '';
-    return String(s).trim().toLowerCase();
-  }
-
-  // ── Class offering enrichment ──────────────────────────────────────────────
-
-  private async enrichClassOffering(coId: string | null) {
-    if (!coId) return null;
-    const co = await this.coRepo.findOne({ where: { id: coId } });
-    if (!co) return null;
-    const [grade, section, subject] = await Promise.all([
-      this.gradeRepo.findOne({ where: { id: co.gradeId } }),
-      this.sectionRepo.findOne({ where: { id: co.sectionId } }),
-      this.subjectRepo.findOne({ where: { id: co.subjectId } }),
-    ]);
-    const gradeName = grade?.name ?? null;
-    const sectionName = section?.name ?? null;
-    const subjectName = subject?.name ?? null;
-    const displayName = co.name?.trim()
-      || [gradeName, sectionName, subjectName ? `| ${subjectName}` : null].filter(Boolean).join(' ')
-      || 'Untitled Class';
-    return {
-      classOfferingId: co.id,
-      displayName,
-      gradeName,
-      sectionName,
-      subjectName,
-      subjectId: co.subjectId,
-      gradeId: co.gradeId,
-      sectionId: co.sectionId,
-      teacherId: co.teacherId,
-    };
+    const str = String(s).trim().toLowerCase();
+    // Map common index/letter variations
+    if (str === '0' || str === 'a' || str === 'true' || str === 't') return '0';
+    if (str === '1' || str === 'b' || str === 'false' || str === 'f') return '1';
+    if (str === '2' || str === 'c') return '2';
+    if (str === '3' || str === 'd') return '3';
+    if (str === '4' || str === 'e') return '4';
+    return str;
   }
 
   private autoGradableType(type: string): boolean {
-    const t = this.norm(type);
-    return t === 'mcq' || t === 'true_false' || t === 'true-false';
+    const t = String(type).trim().toLowerCase();
+    return t === 'mcq' || t === 'true_false' || t === 'true-false' || t === 'truefalse' || t === 'fillin' || t === 'fill-in';
+  }
+
+  private async syncAttemptToGradeEntry(attempt: ExamAttempt, exam: Exam) {
+    if (!exam.classOfferingId) return; // Only sync class-scoped exams for now
+
+    const existing = await this.gradeEntryRepo.findOne({
+      where: {
+        examAttemptId: attempt.id,
+      },
+    });
+
+    const data = {
+      classOfferingId: exam.classOfferingId,
+      studentId: attempt.studentId,
+      teacherId: exam.createdById,
+      title: exam.title,
+      type: GradeEntryType.EXAM,
+      score: attempt.score,
+      maxScore: exam.maxPoints,
+      examAttemptId: attempt.id,
+      termId: exam.termId as string,
+      releasedAt: attempt.releasedAt,
+    };
+
+    if (existing) {
+      existing.score = attempt.score;
+      existing.maxScore = exam.maxPoints;
+      existing.releasedAt = attempt.releasedAt;
+      existing.termId = exam.termId as string;
+      await this.gradeEntryRepo.save(existing);
+    } else {
+      // Also try to find by studentId + classOfferingId + title if no attemptId linked yet
+      const byTitle = await this.gradeEntryRepo.findOne({
+        where: {
+          classOfferingId: exam.classOfferingId,
+          studentId: attempt.studentId,
+          title: exam.title,
+        },
+      });
+      if (byTitle) {
+        byTitle.score = attempt.score;
+        byTitle.maxScore = exam.maxPoints;
+        byTitle.releasedAt = attempt.releasedAt;
+        byTitle.examAttemptId = attempt.id;
+        byTitle.termId = exam.termId as string;
+        await this.gradeEntryRepo.save(byTitle);
+      } else {
+        await this.gradeEntryRepo.save(
+          this.gradeEntryRepo.create({
+            classOfferingId: exam.classOfferingId,
+            studentId: attempt.studentId,
+            teacherId: exam.createdById,
+            title: exam.title,
+            type: GradeEntryType.EXAM,
+            score: attempt.score,
+            maxScore: exam.maxPoints,
+            examAttemptId: attempt.id,
+            termId: exam.termId as string,
+            releasedAt: attempt.releasedAt,
+          }),
+        );
+      }
+    }
+  }
+
+  private async ensureGradeEntriesForClass(exam: Exam) {
+    if (!exam.classOfferingId) return;
+    const enrollments = await this.enrollmentRepo.find({
+      where: { classOfferingId: exam.classOfferingId, status: 'active' },
+    });
+
+    for (const en of enrollments) {
+      const existing = await this.gradeEntryRepo.findOne({
+        where: {
+          classOfferingId: exam.classOfferingId,
+          studentId: en.studentId,
+          title: exam.title,
+        },
+      });
+      if (!existing) {
+        await this.gradeEntryRepo.save(
+          this.gradeEntryRepo.create({
+            classOfferingId: exam.classOfferingId,
+            studentId: en.studentId,
+            teacherId: exam.createdById,
+            title: exam.title,
+            type: GradeEntryType.EXAM,
+            score: null,
+            maxScore: exam.maxPoints,
+            termId: exam.termId as string,
+          }),
+        );
+      }
+    }
   }
 
   // Questions
@@ -165,22 +236,14 @@ export class ExamsService {
   }) {
     return this.qRepo.save(this.qRepo.create(body));
   }
-  async listQuestions(subjectId?: string, classOfferingId?: string, skip = 0, take = 50) {
-    // If classOfferingId is provided, resolve its subjectId and use that as filter
-    let resolvedSubjectId = subjectId;
-    if (classOfferingId && !subjectId) {
-      const co = await this.coRepo.findOne({ where: { id: classOfferingId } });
-      if (co) resolvedSubjectId = co.subjectId;
-    }
-    const where = resolvedSubjectId ? { subjectId: resolvedSubjectId } : {};
-    const [items, total] = await this.qRepo.findAndCount({
-      where,
+  listQuestions(subjectId?: string, skip = 0, take = 50) {
+    return this.qRepo.find({
+      where: subjectId ? { subjectId } : {},
       relations: ['subject'],
       skip,
       take,
       order: { createdAt: 'DESC' },
     });
-    return { items, total, skip, take };
   }
   async removeQuestion(id: string) {
     const q = await this.qRepo.findOne({ where: { id } });
@@ -199,13 +262,13 @@ export class ExamsService {
         title: body.title,
         academicYearId: body.academicYearId,
         classOfferingId: body.classOfferingId,
-        termId: body.termId ?? null,
         opensAt: body.opensAt,
         closesAt: body.closesAt,
         durationMinutes: body.durationMinutes,
         minStayMinutes: minStay,
         createdById: body.createdById,
         maxPoints: body.maxPoints ?? 100,
+        termId: body.termId ?? null,
         published: false,
       }),
     );
@@ -220,8 +283,8 @@ export class ExamsService {
   }
   async listExams(yearId: string | undefined, viewer: User, termId?: string) {
     const qb = this.examRepo.createQueryBuilder('e').orderBy('e.opensAt', 'DESC');
-    if (yearId) qb.andWhere('e.academic_year_id = :y', { y: yearId });
-    if (termId) qb.andWhere('e.term_id = :t', { t: termId });
+    if (yearId) qb.andWhere('e.academicYearId = :y', { y: yearId });
+    if (termId) qb.andWhere('e.termId = :t', { t: termId });
     if (viewer.role === UserRole.STUDENT) {
       qb.andWhere('e.published = :pub', { pub: true });
       const enrollments = await this.enrollmentRepo.find({
@@ -229,40 +292,54 @@ export class ExamsService {
       });
       const classIds = [...new Set(enrollments.map((enrollment) => enrollment.classOfferingId))];
       if (classIds.length > 0) {
-        qb.andWhere('(e.class_offering_id IS NULL OR e.class_offering_id IN (:...classIds))', { classIds });
+        qb.andWhere('(e.classOfferingId IS NULL OR e.classOfferingId IN (:...classIds))', { classIds });
       } else {
-        qb.andWhere('e.class_offering_id IS NULL');
+        qb.andWhere('e.classOfferingId IS NULL');
       }
     } else if (viewer.role === UserRole.TEACHER) {
-      qb.andWhere('e.created_by_id = :uid', { uid: viewer.id });
+      qb.andWhere('e.createdById = :uid', { uid: viewer.id });
     }
     const exams = await qb.getMany();
 
-    return Promise.all(
-      exams.map(async (exam) => {
-        const base = {
-          ...exam,
-          classOffering: await this.enrichClassOffering(exam.classOfferingId),
-        };
-        if (viewer.role === UserRole.STUDENT) {
-          const attempt = await this.attRepo.findOne({
-            where: { examId: exam.id, studentId: viewer.id },
-          });
+    const classOfferingIds = [...new Set(exams.map((e) => e.classOfferingId).filter((id): id is string => !!id))];
+    if (!classOfferingIds.length) {
+      return Promise.all(
+        exams.map(async (e) => {
+          const questionCount = await this.eqRepo.count({ where: { examId: e.id } });
+          let attempts: ExamAttempt[] = [];
+          if (viewer.role === UserRole.STUDENT) {
+            attempts = await this.attRepo.find({
+              where: { examId: e.id, studentId: viewer.id },
+            });
+          }
           return {
-            ...base,
-            attempts: attempt
-              ? [{
-                  id: attempt.id,
-                  studentId: attempt.studentId,
-                  startedAt: attempt.startedAt,
-                  submittedAt: attempt.submittedAt,
-                  releasedAt: attempt.releasedAt,
-                  score: attempt.score,
-                }]
-              : [],
+            ...e,
+            questionCount,
+            attempts,
+            classOffering: null,
           };
+        })
+      );
+    }
+
+    const offerings = await this.classOfferings.listByIds(classOfferingIds);
+    const classMap = new Map(offerings.map((co) => [co.id, co] as const));
+
+    return Promise.all(
+      exams.map(async (e) => {
+        const questionCount = await this.eqRepo.count({ where: { examId: e.id } });
+        let attempts: ExamAttempt[] = [];
+        if (viewer.role === UserRole.STUDENT) {
+          attempts = await this.attRepo.find({
+            where: { examId: e.id, studentId: viewer.id },
+          });
         }
-        return base;
+        return {
+          ...e,
+          questionCount,
+          attempts,
+          classOffering: e.classOfferingId ? classMap.get(e.classOfferingId) ?? null : null,
+        };
       }),
     );
   }
@@ -278,23 +355,10 @@ export class ExamsService {
   ) {
     const ex = await this.oneExam(examId);
     this.assertExamEditor(ex, viewer);
-
-    // Get already-added question IDs to prevent duplicates
-    const existing = await this.eqRepo.find({ where: { examId } });
-    const existingQIds = new Set(existing.map((eq) => eq.questionId));
-
-    const skipped: string[] = [];
     for (const it of items) {
-      if (existingQIds.has(it.questionId)) {
-        skipped.push(it.questionId);
-        continue;
-      }
       await this.eqRepo.save(this.eqRepo.create({ examId, ...it }));
-      existingQIds.add(it.questionId);
     }
-
-    const result = await this.eqRepo.find({ where: { examId }, order: { orderIndex: 'ASC' } });
-    return { questions: result, skipped, skippedCount: skipped.length };
+    return this.eqRepo.find({ where: { examId }, order: { orderIndex: 'ASC' } });
   }
   async listExamQuestions(examId: string, viewer: User) {
     const ex = await this.oneExam(examId);
@@ -332,7 +396,9 @@ export class ExamsService {
     const n = await this.eqRepo.count({ where: { examId } });
     if (n === 0) throw new BadRequestException('Add questions before publish');
     e.published = true;
-    return this.examRepo.save(e);
+    const saved = await this.examRepo.save(e);
+    await this.ensureGradeEntriesForClass(saved);
+    return saved;
   }
 
   async startAttempt(examId: string, studentId: string) {
@@ -485,6 +551,7 @@ export class ExamsService {
     a.needsManualGrading = needsManual;
     a.score = scaled;
     await this.attRepo.save(a);
+    await this.syncAttemptToGradeEntry(a, exam);
   }
 
   async submit(attemptId: string) {
@@ -498,6 +565,7 @@ export class ExamsService {
     if (refreshed) {
       const exam = await this.examRepo.findOne({ where: { id: refreshed.examId } });
       if (exam) {
+        await this.ensureGradeEntriesForClass(exam);
         this.events.emitToUser(exam.createdById, 'attempt:activity', {
           attemptId: refreshed.id,
           examId: refreshed.examId,
@@ -519,19 +587,7 @@ export class ExamsService {
             needsManualGrading: refreshed.needsManualGrading,
           }),
         });
-
-        if (exam.classOfferingId && exam.termId) {
-          void this.gradesService.autoCreateFromExamAttempt({
-            classOfferingId: exam.classOfferingId,
-            studentId: refreshed.studentId,
-            teacherId: exam.createdById,
-            examTitle: exam.title,
-            examAttemptId: refreshed.id,
-            score: refreshed.score,
-            maxScore: exam.maxPoints ?? 100,
-            termId: exam.termId,
-          }).catch(() => { /* non-blocking */ });
-        }
+        await this.syncAttemptToGradeEntry(refreshed, exam);
       }
     }
     return refreshed;
@@ -550,19 +606,7 @@ export class ExamsService {
     }
     a.score = score;
     const saved = await this.attRepo.save(a);
-
-    if (exam.classOfferingId && exam.termId) {
-      void this.gradesService.autoCreateFromExamAttempt({
-        classOfferingId: exam.classOfferingId,
-        studentId: a.studentId,
-        teacherId: exam.createdById,
-        examTitle: exam.title,
-        examAttemptId: a.id,
-        score,
-        maxScore: max,
-        termId: exam.termId,
-      }).catch(() => { /* non-blocking */ });
-    }
+    await this.syncAttemptToGradeEntry(saved, exam);
     return saved;
   }
 
@@ -575,6 +619,7 @@ export class ExamsService {
     const alreadyReleased = !!a.releasedAt;
     a.releasedAt = new Date();
     const saved = await this.attRepo.save(a);
+    await this.syncAttemptToGradeEntry(saved, exam);
     if (!alreadyReleased) {
       await this.notifyExamResultReleased(saved, exam);
       await this.gamification.handleExamReleased(saved, exam);
@@ -582,17 +627,15 @@ export class ExamsService {
     return saved;
   }
 
-  async listAttemptsForExam(examId: string, viewer: User, skip = 0, take = 20) {
+  async listAttemptsForExam(examId: string, viewer: User) {
     if (viewer.role !== UserRole.ADMIN && viewer.role !== UserRole.TEACHER) {
       throw new ForbiddenException('Only staff can list exam attempts');
     }
     const ex = await this.oneExam(examId);
     this.assertExamEditor(ex, viewer);
-    const [attempts, total] = await this.attRepo.findAndCount({
+    const attempts = await this.attRepo.find({
       where: { examId },
       order: { submittedAt: 'DESC', createdAt: 'DESC' },
-      skip,
-      take,
     });
     const out: Array<{
       attemptId: string;
@@ -621,79 +664,7 @@ export class ExamsService {
         needsManualGrading: a.needsManualGrading,
       });
     }
-    return { examId, total, skip, take, attempts: out };
-  }
-
-  /**
-   * Exam summary for the results & grades tab.
-   * Returns the questions asked (without answer keys for non-staff) and
-   * a compact per-student result table.
-   */
-  async getExamSummary(examId: string, viewer: User) {
-    const exam = await this.oneExam(examId);
-    this.assertExamEditor(exam, viewer);
-
-    // Questions asked
-    const eqRows = await this.eqRepo.find({ where: { examId }, order: { orderIndex: 'ASC' } });
-    const qIds = [...new Set(eqRows.map((r) => r.questionId))];
-    const questions = qIds.length ? await this.qRepo.find({ where: { id: In(qIds) } }) : [];
-    const qMap = new Map(questions.map((q) => [q.id, q]));
-    const questionsAsked = eqRows.map((eq) => {
-      const q = qMap.get(eq.questionId);
-      return {
-        examQuestionId: eq.id,
-        questionId: eq.questionId,
-        orderIndex: eq.orderIndex,
-        points: eq.points,
-        type: q?.type ?? 'mcq',
-        stem: q?.stem ?? '',
-        optionsJson: q?.optionsJson ?? null,
-        answerKey: q?.answerKey ?? null,
-      };
-    });
-
-    // Per-student results (compact)
-    const attempts = await this.attRepo.find({
-      where: { examId },
-      order: { submittedAt: 'DESC', createdAt: 'DESC' },
-    });
-    const studentResults = await Promise.all(
-      attempts.map(async (a) => {
-        const student = await this.userRepo.findOne({ where: { id: a.studentId } });
-        return {
-          attemptId: a.id,
-          studentId: a.studentId,
-          firstName: student?.firstName ?? null,
-          lastName: student?.lastName ?? null,
-          studentEmail: student?.email ?? null,
-          submittedAt: a.submittedAt,
-          score: a.score,
-          autoScore: a.autoScore,
-          maxPoints: exam.maxPoints,
-          needsManualGrading: a.needsManualGrading,
-          releasedAt: a.releasedAt,
-          isLocked: a.isLocked,
-        };
-      }),
-    );
-
-    const classOffering = await this.enrichClassOffering(exam.classOfferingId);
-
-    return {
-      examId: exam.id,
-      title: exam.title,
-      maxPoints: exam.maxPoints,
-      opensAt: exam.opensAt,
-      closesAt: exam.closesAt,
-      durationMinutes: exam.durationMinutes,
-      published: exam.published,
-      classOffering,
-      questionsAsked,
-      studentResults,
-      totalStudents: studentResults.length,
-      submitted: studentResults.filter((r) => r.submittedAt).length,
-      released: studentResults.filter((r) => r.releasedAt).length,
-    };
+    return { examId, attempts: out };
   }
 
   async getAttemptForGrader(attemptId: string, viewer: User) {
@@ -726,7 +697,22 @@ export class ExamsService {
     const qIds = [...new Set(eqRows.map((eq) => eq.questionId))];
     const questions = qIds.length ? await this.qRepo.find({ where: { id: In(qIds) } }) : [];
     const qMap = new Map(questions.map((q) => [q.id, q]));
-    const examQuestions = eqRows.map((eq) => ({ ...eq, question: qMap.get(eq.questionId) ?? null }));
+    const examQuestions = eqRows.map((eq) => {
+      const q = qMap.get(eq.questionId);
+      return {
+        ...eq,
+        question: q
+          ? {
+              id: q.id,
+              type: q.type,
+              stem: q.stem,
+              optionsJson: q.optionsJson,
+              answerKey: q.answerKey,
+              attachmentsJson: q.attachmentsJson,
+            }
+          : null,
+      };
+    });
     const student = await this.userRepo.findOne({ where: { id: a.studentId } });
     return {
       attempt: {
@@ -746,6 +732,7 @@ export class ExamsService {
         title: exam.title,
         maxPoints: exam.maxPoints,
         academicYearId: exam.academicYearId,
+        classOfferingId: exam.classOfferingId,
       },
       examQuestions,
       answers,
@@ -773,9 +760,17 @@ export class ExamsService {
   async getResult(attemptId: string, viewer: User) {
     const a = await this.attRepo.findOne({ where: { id: attemptId } });
     if (!a) throw new NotFoundException('Attempt not found');
-    if (!a.releasedAt) throw new BadRequestException('Result not released');
+    if (!a.releasedAt && viewer.role === UserRole.STUDENT) {
+      throw new BadRequestException('Result not released');
+    }
     await this.assertCanViewAttempt(a, viewer);
     const exam = await this.examRepo.findOne({ where: { id: a.examId } });
+    let answers: unknown = {};
+    try {
+      answers = JSON.parse(a.answersJson || '{}');
+    } catch {
+      answers = {};
+    }
     let breakdown: unknown = null;
     if (a.breakdownJson) {
       try {
@@ -784,6 +779,36 @@ export class ExamsService {
         breakdown = null;
       }
     }
+    const eqRows = await this.eqRepo.find({
+      where: { examId: a.examId },
+      order: { orderIndex: 'ASC' },
+    });
+    const qIds = [...new Set(eqRows.map((eq) => eq.questionId))];
+    const questions = qIds.length ? await this.qRepo.find({ where: { id: In(qIds) } }) : [];
+    const qMap = new Map(questions.map((q) => [q.id, q]));
+    const breakdownData = (breakdown as any)?.perQuestion || [];
+    const breakdownMap = new Map<string, any>(breakdownData.map((b: any) => [b.questionId, b]));
+    const studentAnswers = (answers as Record<string, any>) || {};
+
+    const formattedQuestions = eqRows.map((eq) => {
+      const q = qMap.get(eq.questionId);
+      const studentAnswer = String(studentAnswers[eq.questionId] ?? '');
+      const bItem = breakdownMap.get(eq.questionId);
+      return {
+        id: eq.questionId,
+        orderIndex: eq.orderIndex,
+        points: eq.points,
+        type: q?.type ?? 'mcq',
+        stem: q?.stem ?? '',
+        optionsJson: q?.optionsJson ?? null,
+        // Only show answerKey if student can view results (usually when released)
+        answerKey: a.releasedAt || viewer.role !== UserRole.STUDENT ? q?.answerKey : null,
+        studentAnswer,
+        pointsEarned: bItem?.pointsEarned ?? 0,
+        isCorrect: bItem ? bItem.pointsEarned === bItem.pointsMax : null,
+      };
+    });
+
     const student = await this.userRepo.findOne({ where: { id: a.studentId } });
     return {
       attemptId: a.id,
@@ -795,7 +820,9 @@ export class ExamsService {
       needsManualGrading: a.needsManualGrading,
       submittedAt: a.submittedAt,
       releasedAt: a.releasedAt,
+      answers,
       breakdown,
+      questions: formattedQuestions,
       student: student
         ? { id: student.id, firstName: student.firstName, lastName: student.lastName, email: student.email }
         : null,

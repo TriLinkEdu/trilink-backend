@@ -39,6 +39,24 @@ export class HomeroomService {
    * If an assignment already exists for that year+grade+section, it is updated.
    */
   async assign(dto: AssignHomeroomDto): Promise<HomeroomAssignment> {
+    // 1. Validate existence of all related entities to prevent DB 500 errors
+    const [teacher, year, grade, section] = await Promise.all([
+      this.userRepo.findOne({ where: { id: dto.teacherId } }),
+      this.yearRepo.findOne({ where: { id: dto.academicYearId } }),
+      this.gradeRepo.findOne({ where: { id: dto.gradeId } }),
+      this.sectionRepo.findOne({ where: { id: dto.sectionId } }),
+    ]);
+
+    if (!teacher) throw new BadRequestException('Teacher not found');
+    if (!year) throw new BadRequestException('Academic year not found');
+    if (!grade) throw new BadRequestException('Grade not found');
+    if (!section) throw new BadRequestException('Section not found');
+
+    // Prevent a teacher from being assigned to multiple homerooms in the same academic year
+    const teacherAlreadyAssigned = await this.homeroomRepo.findOne({
+      where: { teacherId: dto.teacherId, academicYearId: dto.academicYearId },
+    });
+
     const existing = await this.homeroomRepo.findOne({
       where: {
         academicYearId: dto.academicYearId,
@@ -46,6 +64,13 @@ export class HomeroomService {
         sectionId: dto.sectionId,
       },
     });
+
+    if (teacherAlreadyAssigned) {
+      // If the teacher is already assigned to THIS exact homeroom, no error (it's a no-op or same assignment)
+      if (!existing || existing.id !== teacherAlreadyAssigned.id) {
+        throw new BadRequestException('This teacher is already assigned as a homeroom teacher for another class in this academic year');
+      }
+    }
 
     if (existing) {
       existing.teacherId = dto.teacherId;
@@ -121,8 +146,8 @@ export class HomeroomService {
     // Find all enrollments for those class offerings
     const enrollments = await this.enrollmentRepo
       .createQueryBuilder('e')
-      .where('e.class_offering_id IN (:...ids)', { ids: classOfferingIds })
-      .andWhere('e.academic_year_id = :yearId', { yearId: activeYear.id })
+      .where('e.classOfferingId IN (:...ids)', { ids: classOfferingIds })
+      .andWhere('e.academicYearId = :yearId', { yearId: activeYear.id })
       .getMany();
 
     // Deduplicate by studentId
@@ -174,9 +199,9 @@ export class HomeroomService {
   > {
     const qb = this.homeroomRepo.createQueryBuilder('ha');
     if (academicYearId) {
-      qb.where('ha.academic_year_id = :academicYearId', { academicYearId });
+      qb.where('ha.academicYearId = :academicYearId', { academicYearId });
     }
-    const assignments = await qb.orderBy('ha.created_at', 'DESC').getMany();
+    const assignments = await qb.orderBy('ha.createdAt', 'DESC').getMany();
 
     return Promise.all(
       assignments.map(async (a) => {

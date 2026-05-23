@@ -47,22 +47,22 @@ export class AnalyticsService {
     const examsPublished = await this.examRepo.count({ where: { published: true } });
     const attemptsSubmitted = await this.attRepo
       .createQueryBuilder('a')
-      .where('a.submitted_at IS NOT NULL')
+      .where('a.submittedAt IS NOT NULL')
       .getCount();
 
     const attemptsReleased = await this.attRepo
       .createQueryBuilder('a')
-      .where('a.released_at IS NOT NULL')
+      .where('a.releasedAt IS NOT NULL')
       .getCount();
 
     const marksLast30 = await this.markRepo
       .createQueryBuilder('m')
-      .where('m.created_at >= :s', { s: since })
+      .where('m.createdAt >= :s', { s: since })
       .getCount();
 
     const presentLast30 = await this.markRepo
       .createQueryBuilder('m')
-      .where('m.created_at >= :s', { s: since })
+      .where('m.createdAt >= :s', { s: since })
       .andWhere("m.status IN ('present','late')")
       .getCount();
 
@@ -136,19 +136,19 @@ export class AnalyticsService {
 
     const attempts = await this.attRepo
       .createQueryBuilder('a')
-      .innerJoin(Exam, 'e', 'e.id = a.exam_id')
+      .innerJoin(Exam, 'e', 'e.id = a.examId')
       .select([
         'a.id as attemptId',
-        'a.exam_id as examId',
+        'a.examId as examId',
         'a.score as score',
-        'a.max_points_snapshot as maxPoints',
-        'a.released_at as releasedAt',
-        'e.class_offering_id as classOfferingId',
+        'a.maxPointsSnapshot as maxPoints',
+        'a.releasedAt as releasedAt',
+        'e.classOfferingId as classOfferingId',
       ])
-      .where('a.student_id = :sid', { sid: studentId })
-      .andWhere('a.released_at IS NOT NULL')
-      .andWhere('e.class_offering_id IN (:...cids)', { cids: activeClassIds })
-      .orderBy('a.released_at', 'ASC')
+      .where('a.studentId = :sid', { sid: studentId })
+      .andWhere('a.releasedAt IS NOT NULL')
+      .andWhere('e.classOfferingId IN (:...cids)', { cids: activeClassIds })
+      .orderBy('a.releasedAt', 'ASC')
       .getRawMany();
 
     const classMap = await this.classNameMap(activeClassIds);
