@@ -187,7 +187,7 @@ export class ReportCardsService {
     try {
       await this.assertCanViewStudent(viewer, studentId);
 
-      const student = await this.userRepo.findOne({ where: { id: studentId }, relations: ['profile'] });
+      const student = await this.userRepo.findOne({ where: { id: studentId } });
       if (!student) throw new NotFoundException('Student not found');
 
       const term = await this.termRepo.findOne({ where: { id: termId } });

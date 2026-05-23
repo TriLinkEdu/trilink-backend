@@ -12,6 +12,7 @@ import { ClassOffering } from '../class-offerings/entities/class-offering.entity
 import { Subject } from '../school-structure/entities/subject.entity';
 import { Grade } from '../school-structure/entities/grade.entity';
 import { Section } from '../school-structure/entities/section.entity';
+import { GradeEntry } from '../grades/entities/grade-entry.entity';
 
 @Injectable()
 export class ReportsService {
@@ -27,6 +28,7 @@ export class ReportsService {
     @InjectRepository(Subject) private readonly subjectRepo: Repository<Subject>,
     @InjectRepository(Grade) private readonly gradeRepo: Repository<Grade>,
     @InjectRepository(Section) private readonly sectionRepo: Repository<Section>,
+    @InjectRepository(GradeEntry) private readonly gradeEntryRepo: Repository<GradeEntry>,
   ) {}
 
   async assertStudentViewer(viewer: User, studentId: string) {
@@ -233,22 +235,34 @@ export class ReportsService {
     for (const sid of studentIds) {
       const u = await this.userRepo.findOne({ where: { id: sid } });
       const att = await this.attendanceBreakdown(sid, d0, d1);
-      const attempts = await this.attRepo.find({
+
+      // Collect all released assessments this week: grade entries (assignments, quizzes, exams)
+      const gradeEntries = await this.gradeEntryRepo.find({
         where: { studentId: sid },
         order: { releasedAt: 'DESC' },
       });
-      const thisWeek = attempts.filter((a) => a.releasedAt && a.releasedAt >= weekAgo);
-      const examRows: unknown[] = [];
-      for (const a of thisWeek.slice(0, 10)) {
-        const e = await this.examRepo.findOne({ where: { id: a.examId } });
-        examRows.push({ score: a.score, title: e?.title, releasedAt: a.releasedAt });
-      }
+      const thisWeekEntries = gradeEntries.filter(
+        (g) => g.releasedAt != null && g.releasedAt >= weekAgo && g.score != null,
+      );
+
+      const assessmentRows: unknown[] = thisWeekEntries.slice(0, 10).map((g) => ({
+        score: g.score,
+        maxScore: g.maxScore,
+        percent: g.maxScore > 0 ? Math.round((g.score! / g.maxScore) * 1000) / 10 : null,
+        title: g.title,
+        type: g.type,
+        releasedAt: g.releasedAt,
+      }));
+
       children.push({
         studentId: sid,
         name: u ? `${u.firstName} ${u.lastName}` : null,
         attendanceThisWeek: att,
-        examsReleasedThisWeek: thisWeek.length,
-        exams: examRows,
+        assessmentsReleasedThisWeek: thisWeekEntries.length,
+        assessments: assessmentRows,
+        // Legacy fields kept for backwards compatibility
+        examsReleasedThisWeek: thisWeekEntries.filter((g) => g.type === 'exam').length,
+        exams: assessmentRows.filter((r: any) => r.type === 'exam'),
       });
     }
 
@@ -435,11 +449,11 @@ export class ReportsService {
     const marks = await this.markRepo.find({ where: { studentId } });
     const markRows = marks.filter((m) => sessionsById.has(m.sessionId));
 
-    const attempts = await this.attRepo.find({ where: { studentId }, order: { releasedAt: 'DESC' } });
-    const releasedAttempts = attempts.filter((a) => a.releasedAt && a.releasedAt >= start && a.releasedAt <= end && a.score != null);
-    const releasedExamIds = [...new Set(releasedAttempts.map((a) => a.examId))];
-    const releasedExams = releasedExamIds.length ? await this.examRepo.find({ where: { id: In(releasedExamIds) } }) : [];
-    const releasedExamMap = new Map(releasedExams.map((e) => [e.id, e]));
+    // Load all released grade entries in the period (covers assignments, quizzes, exams, etc.)
+    const allGradeEntries = await this.gradeEntryRepo.find({ where: { studentId }, order: { releasedAt: 'DESC' } });
+    const releasedEntries = allGradeEntries.filter(
+      (g) => g.releasedAt != null && g.releasedAt >= start && g.releasedAt <= end && g.score != null && g.maxScore > 0,
+    );
 
     // Get student's grade for fallback
     const studentGradeName = u.grade; // e.g., "Grade 9" or "9"
@@ -472,22 +486,21 @@ export class ReportsService {
       const presentLike = (statusCounts.present || 0) + (statusCounts.late || 0);
       const attendancePercent = totalAttendance > 0 ? Math.round((presentLike / totalAttendance) * 10000) / 100 : null;
 
-      const courseAttempts = releasedAttempts
-        .filter((a) => releasedExamMap.get(a.examId)?.classOfferingId === co.id)
-        .map((a) => {
-          const exam = releasedExamMap.get(a.examId);
-          return {
-            attemptId: a.id,
-            examId: a.examId,
-            examTitle: exam?.title ?? null,
-            score: a.score,
-            maxPoints: exam?.maxPoints ?? 100,
-            releasedAt: a.releasedAt,
-          };
-        });
-      const avgScore = courseAttempts.length
+      // All released grade entries for this course in the period
+      const courseEntries = releasedEntries
+        .filter((g) => g.classOfferingId === co.id)
+        .map((g) => ({
+          gradeEntryId: g.id,
+          title: g.title,
+          type: g.type,
+          score: g.score,
+          maxPoints: g.maxScore,
+          percent: Math.round((g.score! / g.maxScore) * 1000) / 10,
+          releasedAt: g.releasedAt,
+        }));
+      const avgScore = courseEntries.length
         ? Math.round(
-            (courseAttempts.reduce((sum, x) => sum + ((x.score ?? 0) / (x.maxPoints || 100)) * 100, 0) / courseAttempts.length) *
+            (courseEntries.reduce((sum, x) => sum + ((x.score ?? 0) / (x.maxPoints || 100)) * 100, 0) / courseEntries.length) *
               100,
           ) / 100
         : null;
@@ -524,8 +537,8 @@ export class ReportsService {
         },
         assessments: {
           averagePercent: avgScore,
-          releasedCount: courseAttempts.length,
-          details: courseAttempts,
+          releasedCount: courseEntries.length,
+          details: courseEntries,
         },
       };
     });
