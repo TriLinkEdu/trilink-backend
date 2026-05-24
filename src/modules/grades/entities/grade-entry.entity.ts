@@ -49,6 +49,10 @@ export class GradeEntry {
   @Column({ name: 'exam_attempt_id', type: 'uuid', nullable: true })
   examAttemptId: string | null;
 
+  /** Optional AI-engine curriculum topic ID */
+  @Column({ name: 'topic_id', type: 'varchar', nullable: true, default: null })
+  topicId: string | null;
+
   /** Term this grade entry belongs to */
   @Column({ name: 'term_id', type: 'uuid' })
   termId: string;

@@ -18,7 +18,7 @@ import { getPostgresConnectionFromEnv } from './postgres-env';
           : ['true', '1', 'yes'].includes(loggingEnv.toLowerCase()) ? 'all' : ['error']) as LoggerOptions;
         const common = {
           entities: TYPEORM_ENTITIES,
-          synchronize: false,
+          synchronize: process.env.SEED_SYNC_SCHEMA === 'true',
           migrations: [__dirname + '/migrations/*.{ts,js}'],
           migrationsRun: true,
           logging,

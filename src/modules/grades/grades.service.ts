@@ -16,6 +16,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { Grade } from '../school-structure/entities/grade.entity';
 import { Section } from '../school-structure/entities/section.entity';
 import { Subject } from '../school-structure/entities/subject.entity';
+import { AiService } from '../ai/ai.service';
 
 @Injectable()
 export class GradesService {
@@ -31,6 +32,7 @@ export class GradesService {
     @InjectRepository(Section) private readonly sectionRepo: Repository<Section>,
     @InjectRepository(Subject) private readonly subjectRepo: Repository<Subject>,
     private readonly notifications: NotificationsService,
+    private readonly aiService: AiService,
   ) {}
 
   // ── Guards ────────────────────────────────────────────────────────────────
@@ -109,6 +111,7 @@ export class GradesService {
       maxScore?: number;
       note?: string | null;
       examAttemptId?: string | null;
+      topicId?: string | null;
       termId: string;
     },
     teacher: User,
@@ -131,9 +134,17 @@ export class GradesService {
       maxScore: body.maxScore ?? 100,
       note: body.note ?? null,
       examAttemptId: body.examAttemptId ?? null,
+      topicId: body.topicId ?? null,
       termId: body.termId,
     });
-    return this.repo.save(entry);
+    const saved = await this.repo.save(entry);
+    
+    // If auto-released (though unlikely in this flow), sync to AI
+    if (saved.releasedAt && saved.topicId && saved.score !== null) {
+      void this.syncGradeToAiCore(saved, teacher).catch(e => this.logger.warn(`AI Sync failed: ${e.message}`));
+    }
+
+    return saved;
   }
 
   /**
@@ -147,6 +158,7 @@ export class GradesService {
       type: GradeEntryType;
       maxScore: number;
       note?: string | null;
+      topicId?: string | null;
       termId: string;
       entries: { studentId: string; score: number | null }[];
     },
@@ -163,8 +175,13 @@ export class GradesService {
         existing.score = e.score;
         existing.maxScore = body.maxScore;
         existing.note = body.note ?? existing.note;
+        existing.topicId = body.topicId ?? existing.topicId;
         if (body.termId !== undefined) existing.termId = body.termId;
-        saved.push(await this.repo.save(existing));
+        const s = await this.repo.save(existing);
+        saved.push(s);
+        if (s.releasedAt && s.topicId && s.score !== null) {
+          void this.syncGradeToAiCore(s, teacher).catch((err: any) => this.logger.warn(`AI Sync failed: ${err.message}`));
+        }
       } else {
         const entry = this.repo.create({
           classOfferingId: body.classOfferingId,
@@ -175,9 +192,14 @@ export class GradesService {
           score: e.score,
           maxScore: body.maxScore,
           note: body.note ?? null,
+          topicId: body.topicId ?? null,
           termId: body.termId,
         });
-        saved.push(await this.repo.save(entry));
+        const s = await this.repo.save(entry);
+        saved.push(s);
+        if (s.releasedAt && s.topicId && s.score !== null) {
+          void this.syncGradeToAiCore(s, teacher).catch((err: any) => this.logger.warn(`AI Sync failed: ${err.message}`));
+        }
       }
     }
     return { saved: saved.length, entries: saved };
@@ -188,7 +210,7 @@ export class GradesService {
    */
   async updateEntry(
     id: string,
-    body: Partial<Pick<GradeEntry, 'score' | 'maxScore' | 'note' | 'title' | 'type'>>,
+    body: Partial<Pick<GradeEntry, 'score' | 'maxScore' | 'note' | 'title' | 'type' | 'topicId'>>,
     viewer: User,
   ) {
     const entry = await this.repo.findOne({ where: { id } });
@@ -213,7 +235,13 @@ export class GradesService {
     }
 
     Object.assign(entry, body);
-    return this.repo.save(entry);
+    const saved = await this.repo.save(entry);
+
+    if (saved.releasedAt && saved.topicId && saved.score !== null) {
+      void this.syncGradeToAiCore(saved, viewer).catch((err: any) => this.logger.warn(`AI Sync failed: ${err.message}`));
+    }
+
+    return saved;
   }
 
   /**
@@ -263,6 +291,12 @@ export class GradesService {
       if (!entry.releasedAt) {
         entry.releasedAt = now;
         await this.repo.save(entry);
+
+        // Sync to AI Core if it's a topic-linked assignment
+        if (entry.topicId && entry.score !== null) {
+          void this.syncGradeToAiCore(entry, viewer).catch((e: any) => this.logger.warn(`AI Sync failed: ${e.message}`));
+        }
+
         // Notify student
         const scoreLabel = entry.score != null ? `${entry.score} / ${entry.maxScore}` : `— / ${entry.maxScore}`;
         await this.notifications.createForUser(entry.studentId, {
@@ -572,6 +606,23 @@ export class GradesService {
         examAttemptId: body.examAttemptId,
         termId: body.termId,
       }),
+    );
+  }
+
+  private async syncGradeToAiCore(entry: GradeEntry, viewer: User) {
+    if (!entry.topicId || entry.score === null) return;
+
+    // We consider a student "mastered" a single data point if they got >= 60%
+    // In a real BKT system, we would pass the raw correctness.
+    const isCorrect = entry.score / entry.maxScore >= 0.6;
+
+    return this.aiService.masteryUpdate(
+      {
+        student_id: entry.studentId,
+        topic_id: entry.topicId,
+        is_correct: isCorrect,
+      },
+      viewer,
     );
   }
 }

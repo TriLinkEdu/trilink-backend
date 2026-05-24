@@ -24,6 +24,7 @@ import { Grade } from '../school-structure/entities/grade.entity';
 import { Section } from '../school-structure/entities/section.entity';
 import { Subject } from '../school-structure/entities/subject.entity';
 import { GradesService } from '../grades/grades.service';
+import { AiService } from '../ai/ai.service';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
@@ -59,6 +60,7 @@ export class ExamsService {
     private readonly classOfferings: ClassOfferingsService,
     private readonly events: EventsGateway,
     private readonly gradesService: GradesService,
+    private readonly aiService: AiService,
     private readonly http: HttpService,
     private readonly config: ConfigService,
   ) {}
@@ -300,48 +302,48 @@ export class ExamsService {
       qb.andWhere('e.createdById = :uid', { uid: viewer.id });
     }
     const exams = await qb.getMany();
+    if (!exams.length) return [];
 
-    const classOfferingIds = [...new Set(exams.map((e) => e.classOfferingId).filter((id): id is string => !!id))];
-    if (!classOfferingIds.length) {
-      return Promise.all(
-        exams.map(async (e) => {
-          const questionCount = await this.eqRepo.count({ where: { examId: e.id } });
-          let attempts: ExamAttempt[] = [];
-          if (viewer.role === UserRole.STUDENT) {
-            attempts = await this.attRepo.find({
-              where: { examId: e.id, studentId: viewer.id },
-            });
-          }
-          return {
-            ...e,
-            questionCount,
-            attempts,
-            classOffering: null,
-          };
-        })
-      );
+    const examIds = exams.map((e) => e.id);
+
+    // Batch fetch question counts
+    const counts = await this.eqRepo
+      .createQueryBuilder('eq')
+      .select('eq.exam_id', 'examId')
+      .addSelect('COUNT(eq.id)', 'count')
+      .where('eq.exam_id IN (:...examIds)', { examIds })
+      .groupBy('eq.exam_id')
+      .getRawMany();
+    const countMap = new Map(counts.map((c) => [c.examId, parseInt(c.count, 10)]));
+
+    // Batch fetch student attempts if applicable
+    let attemptMap = new Map<string, ExamAttempt[]>();
+    if (viewer.role === UserRole.STUDENT) {
+      const allAttempts = await this.attRepo.find({
+        where: { examId: In(examIds), studentId: viewer.id },
+      });
+      for (const a of allAttempts) {
+        const existing = attemptMap.get(a.examId) ?? [];
+        existing.push(a);
+        attemptMap.set(a.examId, existing);
+      }
     }
 
-    const offerings = await this.classOfferings.listByIds(classOfferingIds);
-    const classMap = new Map(offerings.map((co) => [co.id, co] as const));
+    const classOfferingIds = [...new Set(exams.map((e) => e.classOfferingId).filter((id): id is string => !!id))];
+    let classMap = new Map<string, any>();
+    if (classOfferingIds.length > 0) {
+      const offerings = await this.classOfferings.listByIds(classOfferingIds);
+      classMap = new Map(offerings.map((co) => [co.id, co]));
+    }
 
-    return Promise.all(
-      exams.map(async (e) => {
-        const questionCount = await this.eqRepo.count({ where: { examId: e.id } });
-        let attempts: ExamAttempt[] = [];
-        if (viewer.role === UserRole.STUDENT) {
-          attempts = await this.attRepo.find({
-            where: { examId: e.id, studentId: viewer.id },
-          });
-        }
-        return {
-          ...e,
-          questionCount,
-          attempts,
-          classOffering: e.classOfferingId ? classMap.get(e.classOfferingId) ?? null : null,
-        };
-      }),
-    );
+    return exams.map((e) => {
+      return {
+        ...e,
+        questionCount: countMap.get(e.id) ?? 0,
+        attempts: attemptMap.get(e.id) ?? [],
+        classOffering: e.classOfferingId ? classMap.get(e.classOfferingId) ?? null : null,
+      };
+    });
   }
   async oneExam(id: string) {
     const e = await this.examRepo.findOne({ where: { id } });
@@ -620,6 +622,12 @@ export class ExamsService {
     a.releasedAt = new Date();
     const saved = await this.attRepo.save(a);
     await this.syncAttemptToGradeEntry(saved, exam);
+    
+    // Notify AI Core about the results for mastery tracking
+    void this.syncAttemptToAiCore(saved, viewer).catch((e: any) => {
+      this.logger.warn(`AI Core sync failed for attempt ${saved.id}: ${e.message}`);
+    });
+
     if (!alreadyReleased) {
       await this.notifyExamResultReleased(saved, exam);
       await this.gamification.handleExamReleased(saved, exam);
@@ -637,21 +645,16 @@ export class ExamsService {
       where: { examId },
       order: { submittedAt: 'DESC', createdAt: 'DESC' },
     });
-    const out: Array<{
-      attemptId: string;
-      studentId: string;
-      studentEmail: string | null;
-      firstName: string | null;
-      lastName: string | null;
-      submittedAt: Date | null;
-      releasedAt: Date | null;
-      score: number | null;
-      autoScore: number | null;
-      needsManualGrading: boolean;
-    }> = [];
-    for (const a of attempts) {
-      const u = await this.userRepo.findOne({ where: { id: a.studentId } });
-      out.push({
+
+    const studentIds = [...new Set(attempts.map((a) => a.studentId))];
+    const users = studentIds.length
+      ? await this.userRepo.find({ where: { id: In(studentIds) } })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    const out = attempts.map((a) => {
+      const u = userMap.get(a.studentId);
+      return {
         attemptId: a.id,
         studentId: a.studentId,
         studentEmail: u?.email ?? null,
@@ -662,8 +665,8 @@ export class ExamsService {
         score: a.score,
         autoScore: a.autoScore,
         needsManualGrading: a.needsManualGrading,
-      });
-    }
+      };
+    });
     return { examId, attempts: out };
   }
 
@@ -1067,5 +1070,40 @@ export class ExamsService {
     });
 
     return { examId, classOfferingId: ex.classOfferingId, students: out };
+  }
+
+  private async syncAttemptToAiCore(attempt: ExamAttempt, viewer: User) {
+    if (!attempt.breakdownJson) return;
+
+    let breakdown: any;
+    try {
+      breakdown = JSON.parse(attempt.breakdownJson);
+    } catch {
+      return;
+    }
+
+    const perQuestion = (breakdown as any).perQuestion || [];
+    if (!perQuestion.length) return;
+
+    // Get all questions in the exam to check for topicId
+    const eqRows = await this.eqRepo.find({ where: { examId: attempt.examId } });
+    const qIds = eqRows.map((eq) => eq.questionId);
+    const questions = await this.qRepo.find({ where: { id: In(qIds) } });
+    const qMap = new Map(questions.map((q) => [q.id, q]));
+
+    for (const bItem of perQuestion) {
+      const q = qMap.get(bItem.questionId);
+      if (q && q.topicId) {
+        const isCorrect = bItem.pointsEarned === bItem.pointsMax;
+        await this.aiService.masteryUpdate(
+          {
+            student_id: attempt.studentId,
+            topic_id: q.topicId,
+            is_correct: isCorrect,
+          },
+          viewer,
+        );
+      }
+    }
   }
 }

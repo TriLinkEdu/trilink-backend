@@ -17,6 +17,7 @@ import { ClassOfferingsModule } from '../class-offerings/class-offerings.module'
 import { NotificationsModule } from '../notifications/notifications.module';
 import { GamificationModule } from '../gamification/gamification.module';
 import { GradesModule } from '../grades/grades.module';
+import { AiModule } from '../ai/ai.module';
 import { ExamsService } from './exams.service';
 import { QuestionsController } from './questions.controller';
 import { ExamsController } from './exams.controller';
@@ -42,6 +43,7 @@ import { ExamAttemptsController } from './exam-attempts.controller';
     NotificationsModule,
     GamificationModule,
     GradesModule,
+    AiModule,
     HttpModule,
   ],
   controllers: [QuestionsController, ExamsController, ExamAttemptsController],

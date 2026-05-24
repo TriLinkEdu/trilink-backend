@@ -45,14 +45,15 @@ export class EnrollmentsController {
   constructor(private readonly svc: EnrollmentsService) {}
 
   @Get()
-  @Roles(UserRole.ADMIN, UserRole.TEACHER)
-  @ApiOperation({ summary: 'List enrollments (admin / teacher)' })
+  @Roles(UserRole.ADMIN, UserRole.TEACHER, UserRole.STUDENT, UserRole.PARENT)
+  @ApiOperation({ summary: 'List enrollments (all roles)' })
   list(
+    @CurrentUser() user: User,
     @Query('studentId') studentId?: string,
     @Query('classOfferingId') classOfferingId?: string,
     @Query('academicYearId') academicYearId?: string,
   ) {
-    return this.svc.list({ studentId, classOfferingId, academicYearId });
+    return this.svc.list({ studentId, classOfferingId, academicYearId }, user);
   }
 
   @Get('class/:classOfferingId/students')

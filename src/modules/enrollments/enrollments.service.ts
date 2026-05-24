@@ -30,7 +30,18 @@ export class EnrollmentsService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async list(q: { studentId?: string; classOfferingId?: string; academicYearId?: string }) {
+  async list(q: { studentId?: string; classOfferingId?: string; academicYearId?: string }, viewer: User) {
+    if (viewer.role === UserRole.STUDENT) {
+      if (q.studentId && q.studentId !== viewer.id) {
+        throw new ForbiddenException('Students can only list their own enrollments');
+      }
+      q.studentId = viewer.id;
+    } else if (viewer.role === UserRole.PARENT) {
+      if (!q.studentId) throw new BadRequestException('studentId required for parents');
+      const link = await this.psRepo.findOne({ where: { parentId: viewer.id, studentId: q.studentId } });
+      if (!link) throw new ForbiddenException('Not linked to this student');
+    }
+
     const where: Record<string, string> = {};
     if (q.studentId) where.studentId = q.studentId;
     if (q.classOfferingId) where.classOfferingId = q.classOfferingId;

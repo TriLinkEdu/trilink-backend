@@ -11,7 +11,7 @@ export class Achievement {
   key: string;
 
   @Column({ name: 'title', type: 'varchar', length: 120 })
-  title: string;
+  name: string;
 
   @Column({ type: 'text', nullable: true })
   description: string | null;
