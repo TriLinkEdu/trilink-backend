@@ -39,16 +39,37 @@ export class GamificationHubService {
       badges,
       studentBadges,
     ] = await Promise.all([
-      this.gam.getLoginStreak(userId),
-      this.gam.listAchievementsForUser(userId),
-      this.gam.leaderboardByBadgePoints('weekly', 50, user.grade ?? undefined, undefined),
-      this.gam.listQuizzesForStudent(user),
-      this.gam.listDailyMissions(userId),
-      this.teamChallenge.getForStudent(userId),
-      this.gam.getMyProgress(userId),   // full progress including weeklyXp
-      this.gam.nextBadgeProgressForUser(userId),
-      this.gam.listBadges(),
-      this.gam.listUserBadges(userId),
+      this.safe('streak', this.gam.getLoginStreak(userId), {
+        userId,
+        currentStreak: 0,
+        longestStreak: 0,
+        lastLoginDate: null,
+      }),
+      this.safe('achievements', this.gam.listAchievementsForUser(userId), []),
+      this.safe(
+        'leaderboard',
+        this.gam.leaderboardByBadgePoints('weekly', 50, user.grade ?? undefined, undefined),
+        { entries: [] },
+      ),
+      this.safe('availableQuizzes', this.gam.listQuizzesForStudent(user), []),
+      this.safe('dailyMissions', this.gam.listDailyMissions(userId), []),
+      this.safe('teamChallenge', this.teamChallenge.getForStudent(userId), null),
+      this.safe('xpProgress', this.gam.getMyProgress(userId), {
+        userId,
+        currentStreak: 0,
+        longestStreak: 0,
+        totalXp: 0,
+        level: 1,
+        levelTitle: 'Starter',
+        lastLoginDate: null,
+        xpIntoCurrentLevel: 0,
+        xpNeededForNextLevel: 100,
+        weeklyXpEarned: 0,
+        weeklyXpTarget: 300,
+      }),
+      this.safe('nextBadgeProgress', this.gam.nextBadgeProgressForUser(userId), null),
+      this.safe('badges', this.gam.listBadges(), []),
+      this.safe('studentBadges', this.gam.listUserBadges(userId), []),
     ]);
 
     return {
@@ -76,6 +97,16 @@ export class GamificationHubService {
       badges,
       studentBadges,
     };
+  }
+
+  private async safe<T>(label: string, task: Promise<T>, fallback: T): Promise<T> {
+    try {
+      return await task;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[GamificationHub] ${label} failed: ${message}`);
+      return fallback;
+    }
   }
 
   private levelTitle(level: number): string {

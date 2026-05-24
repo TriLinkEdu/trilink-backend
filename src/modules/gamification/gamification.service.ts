@@ -6,10 +6,10 @@ import {
   OnModuleInit,
   Inject,
 } from '@nestjs/common';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Between, IsNull, Like, LessThan, Not, Repository } from 'typeorm';
+import { Between, DataSource, IsNull, Like, LessThan, Not, Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Badge } from './entities/badge.entity';
 import { UserBadge } from './entities/user-badge.entity';
@@ -49,6 +49,7 @@ export class GamificationService implements OnModuleInit {
     @InjectRepository(Topic) private readonly topicRepo: Repository<Topic>,
     private readonly notifications: NotificationsService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   private readonly defaultBadges: Array<{
@@ -105,6 +106,19 @@ export class GamificationService implements OnModuleInit {
   }
 
   async onModuleInit() {
+    await this.dataSource.query(`
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'achievements' AND column_name = 'name'
+        ) THEN
+          ALTER TABLE achievements RENAME COLUMN name TO title;
+        END IF;
+      END $$;
+    `);
+    await this.dataSource.query(`
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS topic_id varchar DEFAULT NULL;
+    `);
     for (const def of this.defaultBadges) {
       const existing = await this.badgeRepo.findOne({ where: { key: def.key } });
       if (!existing) await this.badgeRepo.save(this.badgeRepo.create(def));
@@ -352,6 +366,7 @@ export class GamificationService implements OnModuleInit {
       .addSelect('u.email', 'email')
       .addSelect('u.grade', 'grade')
       .addSelect('u.section', 'section')
+      .addSelect('u.profile_image_file_id', 'profileImageFileId')
       .where('u.role = :role', { role: UserRole.STUDENT });
 
     if (fromDate) {
@@ -372,6 +387,7 @@ export class GamificationService implements OnModuleInit {
       .addGroupBy('u.email')
       .addGroupBy('u.grade')
       .addGroupBy('u.section')
+      .addGroupBy('u.profile_image_file_id')
       .orderBy('SUM(ub.points_earned)', 'DESC')
       .addOrderBy('ub.user_id', 'ASC')
       .take(take)
@@ -387,6 +403,7 @@ export class GamificationService implements OnModuleInit {
         email: row.email,
         grade: row.grade,
         section: row.section,
+        profileImagePath: row.profileImageFileId ? `/files/${row.profileImageFileId}` : null,
       },
     }));
 
@@ -834,21 +851,40 @@ export class GamificationService implements OnModuleInit {
     if (!aiBase) return [] as Array<Record<string, unknown>>;
 
     const key = (process.env.INTERNAL_API_KEY || '').trim();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(key ? { 'X-API-Key': key } : {}),
+    };
     const out: Array<Record<string, unknown>> = [];
 
     for (const topic of topicRows) {
       try {
         const params = new URLSearchParams({ limit: '5', difficulty: 'medium' });
-        const res = await fetch(`${aiBase}/api/ai/content/questions/${topic.id}?${params.toString()}`, {
+        const getRes = await fetch(`${aiBase}/api/ai/content/questions/${topic.id}?${params.toString()}`, {
           method: 'GET',
-          headers: {
-            ...(key ? { 'X-API-Key': key } : {}),
-          },
+          headers,
         });
-        if (!res.ok) continue;
-        const body = (await res.json()) as Record<string, unknown>;
-        const questions = (body['questions'] as Array<Record<string, unknown>> | undefined) || [];
-        for (const q of questions) {
+        if (getRes.ok) {
+          const body = (await getRes.json()) as Record<string, unknown>;
+          const questions = (body['questions'] as Array<Record<string, unknown>> | undefined) || [];
+          if (questions.length > 0) {
+            for (const q of questions) {
+              out.push({ ...q, topicId: topic.id, topicName: topic.name });
+            }
+            continue;
+          }
+        }
+
+        // No persisted questions — generate them on-the-fly.
+        const genRes = await fetch(`${aiBase}/api/ai/content/generate-questions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ topic_id: topic.id, count: 5 }),
+        });
+        if (!genRes.ok) continue;
+        const genBody = (await genRes.json()) as Record<string, unknown>;
+        const generated = (genBody['questions'] as Array<Record<string, unknown>> | undefined) || [];
+        for (const q of generated) {
           out.push({ ...q, topicId: topic.id, topicName: topic.name });
         }
       } catch (_) {
@@ -1163,7 +1199,7 @@ export class GamificationService implements OnModuleInit {
 
     return achievements.map((achievement) => {
       const condition = achievement.unlockCondition || {};
-      const target = typeof condition.value === 'number' ? condition.value : 1;
+      const target = this.toSafeInt(condition.value, 1);
       let current = 0;
 
       switch (condition.type) {
@@ -1199,10 +1235,19 @@ export class GamificationService implements OnModuleInit {
         isUnlocked: !!unlockedRow,
         unlockedAt: unlockedRow?.unlockedAt ?? null,
         category: achievement.category,
-        progressCurrent: current,
-        progressTarget: target,
+        progressCurrent: this.toSafeInt(current, 0),
+        progressTarget: target > 0 ? target : 1,
       };
     });
+  }
+
+  private toSafeInt(value: unknown, fallback: number): number {
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+    if (typeof value === 'string') {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return fallback;
   }
 
   async checkAndUnlockAchievements(userId: string) {

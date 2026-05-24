@@ -18,7 +18,7 @@ import { ClassOffering } from '../class-offerings/entities/class-offering.entity
 
 @Injectable()
 export class AiService {
-  private readonly requestTimeoutMs = 15_000;
+  private readonly requestTimeoutMs = 60_000;
 
   constructor(
     @InjectRepository(ParentStudent) private readonly psRepo: Repository<ParentStudent>,
@@ -68,6 +68,7 @@ export class AiService {
       }
       return (await res.json()) as T;
     } catch (err) {
+      console.error(`[fetchAi ERROR] Failed to fetch ${baseUrl}${path}:`, err);
       if (err instanceof BadGatewayException || err instanceof BadRequestException) throw err;
       throw new BadGatewayException('Unable to reach AI service');
     } finally {
