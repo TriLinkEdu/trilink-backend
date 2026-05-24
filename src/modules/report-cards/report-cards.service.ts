@@ -461,10 +461,16 @@ export class ReportCardsService {
 
     const valid = studentSummaries.filter(Boolean) as NonNullable<(typeof studentSummaries)[0]>[];
 
-    // Rank by overallPercent descending
+    // Rank by overallPercent descending, handling ties correctly
     valid.sort((a, b) => b.overallPercent - a.overallPercent);
+    let currentRank = 0;
+    let lastPercent = -1;
     valid.forEach((s, i) => {
-      s.rank = i + 1;
+      if (s.overallPercent !== lastPercent) {
+        currentRank = i + 1;
+        lastPercent = s.overallPercent;
+      }
+      s.rank = currentRank;
     });
 
     return { gradeId, sectionId, termId, students: valid };
