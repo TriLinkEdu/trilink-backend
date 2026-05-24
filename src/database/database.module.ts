@@ -17,7 +17,7 @@ import { getPostgresConnectionFromEnv } from './postgres-env';
           : ['true', '1', 'yes'].includes(loggingEnv.toLowerCase());
         const common = {
           entities: TYPEORM_ENTITIES,
-          synchronize: process.env.NODE_ENV !== 'production',
+          synchronize: process.env.SEED_SYNC_SCHEMA === 'true',
           logging,
         };
         if (dbType === 'sqlite') {

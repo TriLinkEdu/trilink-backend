@@ -10,8 +10,8 @@ export class Achievement {
   @Column({ type: 'varchar', length: 64, unique: true })
   key: string;
 
-  @Column({ name: 'name', type: 'varchar', length: 120 })
-  title: string;
+  @Column({ type: 'varchar', length: 120 })
+  name: string;
 
   @Column({ type: 'text', nullable: true })
   description: string | null;

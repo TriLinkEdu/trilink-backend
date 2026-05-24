@@ -1124,7 +1124,7 @@ export class GamificationService implements OnModuleInit {
       if (!exists) {
         await this.achievementRepo.save({
           key: def.key,
-          title: def.title,
+          name: def.title,
           description: def.description,
           category: def.category as any,
           unlockCondition: def.condition,
@@ -1192,7 +1192,7 @@ export class GamificationService implements OnModuleInit {
       const unlockedRow = unlockedMap.get(achievement.id);
       return {
         id: achievement.id,
-        title: achievement.title,
+        title: achievement.name,
         description: achievement.description ?? '',
         iconUrl: achievement.iconUrl ?? '',
         xpValue: 0,
@@ -1248,7 +1248,7 @@ export class GamificationService implements OnModuleInit {
         await this.userAchievementRepo.save({ userId, achievementId: achievement.id });
         newlyUnlocked.push(achievement);
         await this.notifications.createForUser(userId, {
-          title: `Achievement Unlocked: ${achievement.title}`,
+          title: `Achievement Unlocked: ${achievement.name}`,
           body: achievement.description || '',
           type: 'achievement',
         });
