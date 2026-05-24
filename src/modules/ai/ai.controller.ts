@@ -189,6 +189,25 @@ export class AiController {
     return this.ai.generateLesson(dto.topic_id);
   }
 
+  @Get('analytics/engagement/:studentId')
+  @ApiOperation({ summary: 'Student engagement metrics' })
+  @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  engagement(@Param('studentId', ParseUUIDPipe) studentId: string, @CurrentUser() user: User) {
+    return this.ai.engagement(studentId, user);
+  }
+
+  @Get('analytics/learning-curve/:studentId/:topicId')
+  @ApiOperation({ summary: 'Student learning curve for a topic' })
+  @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  @ApiParam({ name: 'topicId', description: 'Topic ID' })
+  learningCurve(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @Param('topicId') topicId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.ai.learningCurve(studentId, topicId, user);
+  }
+
   @Post('content/generate-questions')
   @ApiOperation({
     summary: 'Generate quiz questions for a topic (AI)',

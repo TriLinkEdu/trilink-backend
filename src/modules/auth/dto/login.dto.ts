@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
 
 export enum LoginRole {
   ADMIN = 'admin',
@@ -31,5 +31,6 @@ export class LoginDto {
     description: 'Portal role; must match the account type (admin, teacher, student, parent)',
   })
   @IsEnum(LoginRole)
-  role: LoginRole;
+  @IsOptional()
+  role?: LoginRole;
 }

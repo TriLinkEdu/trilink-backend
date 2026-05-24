@@ -48,17 +48,21 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const portalRole = String(dto.role).toLowerCase();
-    const accountRole = String(user.role).toLowerCase();
-    const roleMatch = portalRole === accountRole;
-
-    if (!roleMatch) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
-
     const valid = await this.usersService.validatePassword(user, dto.password);
     if (!valid) {
       throw new UnauthorizedException('Invalid email or password');
+    }
+
+    // Only enforce role check if it was provided (portal login)
+    // If not provided (mobile login), we bypass the check
+    if (dto.role) {
+      const portalRole = String(dto.role).toLowerCase();
+      const accountRole = String(user.role).toLowerCase();
+      const roleMatch = portalRole === accountRole;
+
+      if (!roleMatch) {
+        throw new UnauthorizedException('Invalid email or password');
+      }
     }
 
     const res = await this.buildTokenResponse(user);

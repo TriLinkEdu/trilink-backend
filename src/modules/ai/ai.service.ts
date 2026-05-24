@@ -289,6 +289,16 @@ export class AiService {
     return this.fetchAi(`/api/ai/analytics/subject/${subjectId}/class-performance?limit=${limit}&offset=${offset}`, { method: 'GET' });
   }
 
+  async engagement(studentId: string, viewer: User) {
+    await this.assertCanAccessStudent(viewer, studentId);
+    return this.fetchAi(`/api/ai/analytics/engagement/${studentId}`, { method: 'GET' });
+  }
+
+  async learningCurve(studentId: string, topicId: string, viewer: User) {
+    await this.assertCanAccessStudent(viewer, studentId);
+    return this.fetchAi(`/api/ai/analytics/learning-curve/${studentId}/${topicId}`, { method: 'GET' });
+  }
+
   // ── Evaluate (rules engine — works without AI_SERVICE_URL) ─────────────────
 
   async evaluateMe(studentId: string, viewer: User) {
