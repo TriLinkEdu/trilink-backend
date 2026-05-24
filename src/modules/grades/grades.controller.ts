@@ -53,6 +53,7 @@ class BulkGradeDto {
   @ApiProperty({ description: 'Maximum possible score', example: 100 }) @IsNumber() @Min(1) maxScore: number;
   @ApiPropertyOptional({ description: 'Optional note for all entries' }) @IsOptional() @IsString() note?: string;
   @ApiProperty({ description: 'Term UUID to tag these entries' }) @IsUUID() termId: string;
+  @ApiPropertyOptional({ description: 'Optional AI-engine curriculum topic ID' }) @IsOptional() @IsString() topicId?: string;
   @ApiProperty({ type: [StudentScoreRow], description: 'One row per student' })
   @IsArray()
   @ValidateNested({ each: true })
@@ -69,6 +70,7 @@ class CreateEntryDto {
   @ApiPropertyOptional({ default: 100 }) @IsOptional() @IsNumber() @Min(1) maxScore?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string | null;
   @ApiProperty({ description: 'Term UUID to tag this entry' }) @IsUUID() termId: string;
+  @ApiPropertyOptional({ description: 'Optional AI-engine curriculum topic ID' }) @IsOptional() @IsString() topicId?: string;
 }
 
 class PatchEntryDto {
@@ -77,6 +79,7 @@ class PatchEntryDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() score?: number | null;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(1) maxScore?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string | null;
+  @ApiPropertyOptional({ description: 'Optional AI-engine curriculum topic ID' }) @IsOptional() @IsString() topicId?: string;
 }
 
 class ReleaseDto {

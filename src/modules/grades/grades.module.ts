@@ -9,6 +9,7 @@ import { Grade } from '../school-structure/entities/grade.entity';
 import { Section } from '../school-structure/entities/section.entity';
 import { Subject } from '../school-structure/entities/subject.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { AiModule } from '../ai/ai.module';
 import { GradesService } from './grades.service';
 import { GradesController } from './grades.controller';
 
@@ -16,6 +17,7 @@ import { GradesController } from './grades.controller';
   imports: [
     TypeOrmModule.forFeature([GradeEntry, User, ClassOffering, Enrollment, ParentStudent, Grade, Section, Subject]),
     NotificationsModule,
+    AiModule,
   ],
   controllers: [GradesController],
   providers: [GradesService],

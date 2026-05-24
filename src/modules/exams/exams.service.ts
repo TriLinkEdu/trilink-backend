@@ -24,6 +24,7 @@ import { Grade } from '../school-structure/entities/grade.entity';
 import { Section } from '../school-structure/entities/section.entity';
 import { Subject } from '../school-structure/entities/subject.entity';
 import { GradesService } from '../grades/grades.service';
+import { AiService } from '../ai/ai.service';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
@@ -59,6 +60,7 @@ export class ExamsService {
     private readonly classOfferings: ClassOfferingsService,
     private readonly events: EventsGateway,
     private readonly gradesService: GradesService,
+    private readonly aiService: AiService,
     private readonly http: HttpService,
     private readonly config: ConfigService,
   ) {}
@@ -620,6 +622,12 @@ export class ExamsService {
     a.releasedAt = new Date();
     const saved = await this.attRepo.save(a);
     await this.syncAttemptToGradeEntry(saved, exam);
+    
+    // Notify AI Core about the results for mastery tracking
+    void this.syncAttemptToAiCore(saved, viewer).catch((e: any) => {
+      this.logger.warn(`AI Core sync failed for attempt ${saved.id}: ${e.message}`);
+    });
+
     if (!alreadyReleased) {
       await this.notifyExamResultReleased(saved, exam);
       await this.gamification.handleExamReleased(saved, exam);
@@ -1067,5 +1075,40 @@ export class ExamsService {
     });
 
     return { examId, classOfferingId: ex.classOfferingId, students: out };
+  }
+
+  private async syncAttemptToAiCore(attempt: ExamAttempt, viewer: User) {
+    if (!attempt.breakdownJson) return;
+
+    let breakdown: any;
+    try {
+      breakdown = JSON.parse(attempt.breakdownJson);
+    } catch {
+      return;
+    }
+
+    const perQuestion = (breakdown as any).perQuestion || [];
+    if (!perQuestion.length) return;
+
+    // Get all questions in the exam to check for topicId
+    const eqRows = await this.eqRepo.find({ where: { examId: attempt.examId } });
+    const qIds = eqRows.map((eq) => eq.questionId);
+    const questions = await this.qRepo.find({ where: { id: In(qIds) } });
+    const qMap = new Map(questions.map((q) => [q.id, q]));
+
+    for (const bItem of perQuestion) {
+      const q = qMap.get(bItem.questionId);
+      if (q && q.topicId) {
+        const isCorrect = bItem.pointsEarned === bItem.pointsMax;
+        await this.aiService.masteryUpdate(
+          {
+            student_id: attempt.studentId,
+            topic_id: q.topicId,
+            is_correct: isCorrect,
+          },
+          viewer,
+        );
+      }
+    }
   }
 }
