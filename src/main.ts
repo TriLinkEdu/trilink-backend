@@ -18,6 +18,24 @@ async function bootstrap() {
     AppModule,
     logLevels?.length ? { logger: logLevels } : undefined,
   );
+
+  // --- DEBUG LOGGER FOR AI CHAT INVESTIGATION ---
+  app.use((req: any, res: any, next: any) => {
+    if (req.originalUrl.includes('/ai/')) {
+      console.log(`\n[REQ] ${req.method} ${req.originalUrl}`);
+      if (req.method === 'POST') console.log(`[REQ BODY]`, req.body);
+      
+      const originalSend = res.send;
+      res.send = function(body: any) {
+        console.log(`[RES] ${res.statusCode} ${req.method} ${req.originalUrl}`);
+        if (res.statusCode >= 400) console.log(`[RES BODY]`, body);
+        return originalSend.call(this, body);
+      };
+    }
+    next();
+  });
+  // ----------------------------------------------
+
   app.useWebSocketAdapter(new IoAdapter(app));
   const config = app.get(ConfigService);
   const port = parseInt(process.env.PORT || '4000', 10);

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { LoggerOptions } from 'typeorm';
 import * as fs from 'fs';
 import * as path from 'path';
 import { TYPEORM_ENTITIES } from './typeorm-entities';
@@ -12,12 +13,14 @@ import { getPostgresConnectionFromEnv } from './postgres-env';
       useFactory: (config: ConfigService) => {
         const dbType = config.get<string>('database.type') || 'postgres';
         const loggingEnv = process.env.DB_LOGGING;
-        const logging = loggingEnv == null
-          ? process.env.NODE_ENV === 'development'
-          : ['true', '1', 'yes'].includes(loggingEnv.toLowerCase());
+        const logging = (loggingEnv == null
+          ? ['error']
+          : ['true', '1', 'yes'].includes(loggingEnv.toLowerCase()) ? 'all' : ['error']) as LoggerOptions;
         const common = {
           entities: TYPEORM_ENTITIES,
-          synchronize: process.env.NODE_ENV !== 'production',
+          synchronize: false,
+          migrations: [__dirname + '/migrations/*.{ts,js}'],
+          migrationsRun: true,
           logging,
         };
         if (dbType === 'sqlite') {

@@ -6,10 +6,10 @@ import {
   OnModuleInit,
   Inject,
 } from '@nestjs/common';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Between, IsNull, Like, LessThan, Not, Repository } from 'typeorm';
+import { Between, DataSource, IsNull, Like, LessThan, Not, Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Badge } from './entities/badge.entity';
 import { UserBadge } from './entities/user-badge.entity';
@@ -49,6 +49,7 @@ export class GamificationService implements OnModuleInit {
     @InjectRepository(Topic) private readonly topicRepo: Repository<Topic>,
     private readonly notifications: NotificationsService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   private readonly defaultBadges: Array<{
@@ -105,6 +106,16 @@ export class GamificationService implements OnModuleInit {
   }
 
   async onModuleInit() {
+    await this.dataSource.query(`
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'achievements' AND column_name = 'name'
+        ) THEN
+          ALTER TABLE achievements RENAME COLUMN name TO title;
+        END IF;
+      END $$;
+    `);
     for (const def of this.defaultBadges) {
       const existing = await this.badgeRepo.findOne({ where: { key: def.key } });
       if (!existing) await this.badgeRepo.save(this.badgeRepo.create(def));
@@ -352,6 +363,7 @@ export class GamificationService implements OnModuleInit {
       .addSelect('u.email', 'email')
       .addSelect('u.grade', 'grade')
       .addSelect('u.section', 'section')
+      .addSelect('u.profile_image_file_id', 'profileImageFileId')
       .where('u.role = :role', { role: UserRole.STUDENT });
 
     if (fromDate) {
@@ -372,6 +384,7 @@ export class GamificationService implements OnModuleInit {
       .addGroupBy('u.email')
       .addGroupBy('u.grade')
       .addGroupBy('u.section')
+      .addGroupBy('u.profile_image_file_id')
       .orderBy('SUM(ub.points_earned)', 'DESC')
       .addOrderBy('ub.user_id', 'ASC')
       .take(take)
@@ -387,6 +400,7 @@ export class GamificationService implements OnModuleInit {
         email: row.email,
         grade: row.grade,
         section: row.section,
+        profileImagePath: row.profileImageFileId ? `/files/${row.profileImageFileId}` : null,
       },
     }));
 
