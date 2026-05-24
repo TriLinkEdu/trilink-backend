@@ -116,6 +116,9 @@ export class GamificationService implements OnModuleInit {
         END IF;
       END $$;
     `);
+    await this.dataSource.query(`
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS topic_id varchar DEFAULT NULL;
+    `);
     for (const def of this.defaultBadges) {
       const existing = await this.badgeRepo.findOne({ where: { key: def.key } });
       if (!existing) await this.badgeRepo.save(this.badgeRepo.create(def));
@@ -848,21 +851,40 @@ export class GamificationService implements OnModuleInit {
     if (!aiBase) return [] as Array<Record<string, unknown>>;
 
     const key = (process.env.INTERNAL_API_KEY || '').trim();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(key ? { 'X-API-Key': key } : {}),
+    };
     const out: Array<Record<string, unknown>> = [];
 
     for (const topic of topicRows) {
       try {
         const params = new URLSearchParams({ limit: '5', difficulty: 'medium' });
-        const res = await fetch(`${aiBase}/api/ai/content/questions/${topic.id}?${params.toString()}`, {
+        const getRes = await fetch(`${aiBase}/api/ai/content/questions/${topic.id}?${params.toString()}`, {
           method: 'GET',
-          headers: {
-            ...(key ? { 'X-API-Key': key } : {}),
-          },
+          headers,
         });
-        if (!res.ok) continue;
-        const body = (await res.json()) as Record<string, unknown>;
-        const questions = (body['questions'] as Array<Record<string, unknown>> | undefined) || [];
-        for (const q of questions) {
+        if (getRes.ok) {
+          const body = (await getRes.json()) as Record<string, unknown>;
+          const questions = (body['questions'] as Array<Record<string, unknown>> | undefined) || [];
+          if (questions.length > 0) {
+            for (const q of questions) {
+              out.push({ ...q, topicId: topic.id, topicName: topic.name });
+            }
+            continue;
+          }
+        }
+
+        // No persisted questions — generate them on-the-fly.
+        const genRes = await fetch(`${aiBase}/api/ai/content/generate-questions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ topic_id: topic.id, count: 5 }),
+        });
+        if (!genRes.ok) continue;
+        const genBody = (await genRes.json()) as Record<string, unknown>;
+        const generated = (genBody['questions'] as Array<Record<string, unknown>> | undefined) || [];
+        for (const q of generated) {
           out.push({ ...q, topicId: topic.id, topicName: topic.name });
         }
       } catch (_) {
@@ -1177,7 +1199,7 @@ export class GamificationService implements OnModuleInit {
 
     return achievements.map((achievement) => {
       const condition = achievement.unlockCondition || {};
-      const target = typeof condition.value === 'number' ? condition.value : 1;
+      const target = this.toSafeInt(condition.value, 1);
       let current = 0;
 
       switch (condition.type) {
@@ -1213,10 +1235,19 @@ export class GamificationService implements OnModuleInit {
         isUnlocked: !!unlockedRow,
         unlockedAt: unlockedRow?.unlockedAt ?? null,
         category: achievement.category,
-        progressCurrent: current,
-        progressTarget: target,
+        progressCurrent: this.toSafeInt(current, 0),
+        progressTarget: target > 0 ? target : 1,
       };
     });
+  }
+
+  private toSafeInt(value: unknown, fallback: number): number {
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+    if (typeof value === 'string') {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return fallback;
   }
 
   async checkAndUnlockAchievements(userId: string) {
