@@ -13,8 +13,10 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  PayloadTooLargeException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import {
   ApiBearerAuth,
   ApiConsumes,
@@ -269,11 +271,53 @@ export class ChatController {
     return this.chat.getPresence(ids);
   }
 
+  @Patch('messages/:id')
+  @ApiOperation({ summary: 'Edit a message (sender only, top-level)' })
+  @ApiParam({ name: 'id', description: 'Message UUID' })
+  editMessageTop(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: EditMessageDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.editMessage(null, id, user.id, dto.text);
+  }
+
+  @Delete('messages/:id')
+  @ApiOperation({ summary: 'Soft-delete a message (sender or admin, top-level)' })
+  @ApiParam({ name: 'id', description: 'Message UUID' })
+  deleteMessageTop(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.deleteMessage(null, id, user.id, user.role);
+  }
+
   @Post('chat/upload')
   @ApiOperation({ summary: 'Upload chat media (max 50 MB)' })
   @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
   uploadMedia(
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: User,
+  ) {
+    return this.chat.uploadChatMedia(file, user.id);
+  }
+
+  @Post('chat/files/upload')
+  @ApiOperation({ summary: 'Upload chat media (alias for mobile compatibility)' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
+  uploadMediaAlias(
     @UploadedFile() file: Express.Multer.File,
     @CurrentUser() user: User,
   ) {
@@ -314,15 +358,29 @@ export class ChatController {
   }
 
   @Post('messages/:id/reactions')
-  @ApiOperation({ summary: 'Add reaction to a message' })
+  @ApiOperation({ summary: 'Toggle emoji reaction on a message (top-level)' })
+  @ApiParam({ name: 'id', description: 'Message UUID' })
   addReaction(@Param('id', ParseUUIDPipe) id: string, @Body() body: ReactionDto, @CurrentUser() user: User) {
     return this.chat.addReaction(id, user.id, body.emoji);
   }
 
   @Delete('messages/:id/reactions/:emoji')
-  @ApiOperation({ summary: 'Remove reaction from a message' })
+  @ApiOperation({ summary: 'Remove reaction from a message (top-level)' })
+  @ApiParam({ name: 'id', description: 'Message UUID' })
+  @ApiParam({ name: 'emoji', description: 'Emoji character' })
   removeReaction(@Param('id', ParseUUIDPipe) id: string, @Param('emoji') emoji: string, @CurrentUser() user: User) {
     return this.chat.removeReaction(id, user.id, decodeURIComponent(emoji));
+  }
+
+  @Post('messages/:id/read')
+  @ApiOperation({ summary: 'Mark a message as read (top-level)' })
+  @ApiParam({ name: 'id', description: 'Message UUID' })
+  async markReadTop(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+  ) {
+    await this.chat.markReadTop(id, user.id);
+    return { ok: true };
   }
 
   @Get('users/search')
