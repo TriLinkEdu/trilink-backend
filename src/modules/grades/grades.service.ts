@@ -58,6 +58,7 @@ export class GradesService {
       return;
     }
     
+    // Case-insensitive ID comparison
     if (tId === vId) {
       this.logger.debug(`assertTeacherOwnsClass: allowing because viewer is the owner`);
       return;
