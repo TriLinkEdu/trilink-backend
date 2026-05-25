@@ -88,7 +88,7 @@ class ReleaseDto {
 }
 
 @ApiTags('Grades (Scores)')
-@Controller('grade-entries')
+@Controller('grades')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth('JWT')
 export class GradesController {
