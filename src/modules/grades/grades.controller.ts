@@ -160,6 +160,20 @@ export class GradesController {
     return this.svc.updateEntry(id, dto, user);
   }
 
+  @Post(':id')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({
+    summary: 'Update a grade entry (using POST as requested)',
+    description: 'Alias for PATCH :id for environments where PATCH is restricted.',
+  })
+  @ApiParam({ name: 'id', description: 'Grade entry UUID' })
+  @ApiBody({ type: PatchEntryDto })
+  @ApiResponse({ status: 200, description: 'Entry updated' })
+  @ApiResponse({ status: 404, description: 'Entry not found' })
+  updatePost(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PatchEntryDto, @CurrentUser() user: User) {
+    return this.svc.updateEntry(id, dto, user);
+  }
+
   @Post('release')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @ApiOperation({
@@ -174,11 +188,27 @@ export class GradesController {
     return this.svc.releaseEntries({ classOfferingId: dto.classOfferingId, title: dto.title }, user);
   }
 
-  @Delete('group')
+  @Delete('class/:classOfferingId/groups')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @HttpCode(200)
   @ApiOperation({
     summary: 'Delete an entire assessment (all entries with the given classOfferingId + title)',
+  })
+  @ApiBody({ type: ReleaseDto })
+  @ApiResponse({ status: 200, description: 'Assessment deleted' })
+  deleteGroupMobile(
+    @Param('classOfferingId', ParseUUIDPipe) classOfferingId: string,
+    @Body() dto: { title: string },
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.deleteGroup({ classOfferingId, title: dto.title }, user);
+  }
+
+  @Delete('group')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Delete an entire assessment (legacy endpoint)',
   })
   @ApiBody({ type: ReleaseDto })
   @ApiResponse({ status: 200, description: 'Assessment deleted' })
