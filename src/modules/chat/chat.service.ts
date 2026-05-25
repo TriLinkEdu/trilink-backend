@@ -427,12 +427,15 @@ export class ChatService {
   }
 
   async editMessage(
-    conversationId: string,
+    conversationId: string | null,
     msgId: string,
     userId: string,
     text: string,
   ): Promise<EnrichedMessage> {
-    const msg = await this.msgRepo.findOne({ where: { id: msgId, conversationId } });
+    const where: any = { id: msgId };
+    if (conversationId) where.conversationId = conversationId;
+    
+    const msg = await this.msgRepo.findOne({ where });
     if (!msg) throw new NotFoundException('Message not found');
     if (msg.senderId !== userId) throw new ForbiddenException('Only the sender can edit this message');
     if (msg.deletedAt) throw new BadRequestException('Cannot edit a deleted message');
@@ -456,16 +459,22 @@ export class ChatService {
   }
 
   async deleteMessage(
-    conversationId: string,
+    conversationId: string | null,
     msgId: string,
     userId: string,
     userRole: UserRole,
   ): Promise<EnrichedMessage> {
-    const msg = await this.msgRepo.findOne({ where: { id: msgId, conversationId } });
+    const where: any = { id: msgId };
+    if (conversationId) where.conversationId = conversationId;
+
+    const msg = await this.msgRepo.findOne({ where });
     if (!msg) throw new NotFoundException('Message not found');
 
     const isAdmin = userRole === UserRole.ADMIN;
-    const convMember = await this.memRepo.findOne({ where: { conversationId, userId } });
+    // If conversationId wasn't provided, get it from message
+    const targetConvId = conversationId || msg.conversationId;
+    
+    const convMember = await this.memRepo.findOne({ where: { conversationId: targetConvId, userId } });
     const isConvAdmin = convMember?.role === 'admin';
 
     if (msg.senderId !== userId && !isAdmin && !isConvAdmin) {
@@ -542,6 +551,15 @@ export class ChatService {
       conversationId,
       lastReadMessageId: messageId,
     });
+  }
+
+  async markReadTop(
+    messageId: string,
+    userId: string,
+  ): Promise<void> {
+    const msg = await this.msgRepo.findOne({ where: { id: messageId } });
+    if (!msg) throw new NotFoundException('Message not found');
+    return this.markRead(msg.conversationId, userId, messageId);
   }
 
   async listMessages(
