@@ -217,4 +217,43 @@ export class ParentStudentsService {
       },
     };
   }
+
+  /**
+   * Teacher: get all parents linked to a specific student.
+   * Only allows access if teacher teaches at least one class the student is enrolled in,
+   * OR if the viewer is an admin.
+   */
+  async getParentsByStudentId(studentId: string, viewer: User) {
+    if (viewer.role === UserRole.TEACHER) {
+      // Check if student is in any of this teacher's classes
+      const teacherClassIds = (await this.coRepo.find({ where: { teacherId: viewer.id } })).map(co => co.id);
+      const studentEnrollments = await this.enrollmentRepo.find({ 
+        where: { studentId, classOfferingId: In(teacherClassIds), status: 'active' } 
+      });
+
+      if (studentEnrollments.length === 0) {
+        throw new ForbiddenException('Student is not in any of your classes');
+      }
+    }
+
+    const links = await this.repo.find({ where: { studentId } });
+    const parentIds = links.map(l => l.parentId);
+    if (!parentIds.length) return [];
+
+    const parents = await this.userRepo.findBy({ id: In(parentIds) });
+
+    return links.map(link => {
+      const parent = parents.find(p => p.id === link.parentId);
+      return {
+        ...link,
+        parent: parent ? {
+          id: parent.id,
+          firstName: parent.firstName,
+          lastName: parent.lastName,
+          email: parent.email,
+          phone: parent.phone,
+        } : null,
+      };
+    });
+  }
 }

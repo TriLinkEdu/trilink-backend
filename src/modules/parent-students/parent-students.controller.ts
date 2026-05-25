@@ -75,6 +75,19 @@ export class ParentStudentsController {
     return this.svc.upcomingForChild(user.id, studentId);
   }
 
+  @Get('student/:studentId/parents')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({ summary: 'Get parents linked to a student (Teacher/Admin view)' })
+  @ApiParam({ name: 'studentId', description: 'Student UUID' })
+  @ApiResponse({ status: 200, description: 'List of parents' })
+  @ApiResponse({ status: 403, description: 'Not allowed to view this student' })
+  getParentsByStudentId(
+    @Param('studentId', ParseUUIDPipe) studentId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.svc.getParentsByStudentId(studentId, user);
+  }
+
   @Delete(':id')
   @Roles(UserRole.ADMIN)
   async del(@Param('id', ParseUUIDPipe) id: string) {
